@@ -88,7 +88,8 @@ class CustomFaceTemplateTest {
     /** A face that is not the one the recipe was written for is refused, not mangled. */
     @Test
     fun anyOtherShapeIsRefused() {
-        val error = runCatching { CustomFaceTemplate.strip(face("00106")) }.exceptionOrNull()
+        val source = face("00106")
+        val error = runCatching { CustomFaceTemplate.strip(source) }.exceptionOrNull()
         assertTrue("got $error", error is Fit3TemplateMismatchException)
     }
 }
