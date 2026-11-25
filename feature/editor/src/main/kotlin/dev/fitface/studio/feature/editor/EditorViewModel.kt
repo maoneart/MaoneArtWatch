@@ -1,0 +1,2494 @@
+package dev.fitface.studio.feature.editor
+
+import dev.fitface.studio.core.model.visualBounds
+import dev.fitface.studio.core.model.containerCapacity
+import dev.fitface.studio.core.model.visualOffsetX
+import dev.fitface.studio.core.model.visualOffsetY
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.fitface.studio.core.delivery.DirectInstallPhase
+import dev.fitface.studio.core.delivery.DirectInstallState
+import dev.fitface.studio.core.delivery.Fit3DirectInstaller
+import dev.fitface.studio.core.model.AnimationParts
+import dev.fitface.studio.core.model.AnimationPlan
+import dev.fitface.studio.core.model.AnimationSource
+import dev.fitface.studio.core.model.EditKind
+import dev.fitface.studio.core.model.WATCH_CONTAINER_BYTE_CEILING
+import dev.fitface.studio.core.model.animationAddedBytes
+import dev.fitface.studio.core.model.animationStepThatFits
+import dev.fitface.studio.core.model.movingBackgroundBounds
+import dev.fitface.studio.core.model.EditorSnapshot
+import dev.fitface.studio.core.model.EditorVariant
+import dev.fitface.studio.core.model.ImageFit
+import dev.fitface.studio.core.model.ImagePlacement
+import dev.fitface.studio.core.model.PreparedPicture
+import dev.fitface.studio.core.model.PreviewFrame
+import dev.fitface.studio.core.model.TextFont
+import dev.fitface.studio.core.model.ClockFontName
+import dev.fitface.studio.core.model.ClockFontPreview
+import dev.fitface.studio.core.model.ClockFontRequest
+import dev.fitface.studio.core.model.ClockPart
+import dev.fitface.studio.core.model.TextPicture
+import dev.fitface.studio.core.model.TextProblem
+import dev.fitface.studio.core.model.VideoClip
+import dev.fitface.studio.core.model.pictureBaselineSize
+import dev.fitface.studio.core.model.pictureSizes
+import dev.fitface.studio.core.model.ReplacementImage
+import dev.fitface.studio.core.model.WidgetSize
+import dev.fitface.studio.core.model.pictureAddedBytes
+import dev.fitface.studio.core.model.WatchFaceRepository
+import dev.fitface.studio.core.data.DiagnosticsReporter
+import dev.fitface.studio.core.model.DiagnosticsLog
+import dev.fitface.studio.core.model.DiagnosticsSection
+import dev.fitface.studio.core.model.UserMessage
+import dev.fitface.studio.core.model.VariantKind
+import dev.fitface.studio.core.model.WatchFaceException
+import dev.fitface.studio.core.model.WidgetGuide
+import dev.fitface.studio.core.model.WidgetResizeStepPercent
+import dev.fitface.studio.core.model.drawLeft
+import dev.fitface.studio.core.model.drawTop
+import dev.fitface.studio.core.model.nextWidgetSize
+import dev.fitface.studio.core.model.widgetSizePercent
+import java.util.UUID
+import javax.inject.Inject
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+
+data class WidgetMovePreview(
+    val globalIndex: Int,
+    val displayX: Float,
+    val displayY: Float,
+)
+
+/**
+ * Where a widget is being moved to, in stored coordinate space.
+ *
+ * [widgetType] and [sequenceId] are captured at enqueue time, from the widget on the
+ * variant that was on canvas then — not re-read from whatever the canvas shows when this
+ * finally commits, which by then may be a different variant entirely. A style's widget 3
+ * and AOD's widget 3 are unrelated records; reading the wrong one's type back would send
+ * the repository the wrong widget's move.
+ */
+internal data class PendingWidgetTarget(
+    val x: Int,
+    val y: Int,
+    val widgetType: Int,
+    val sequenceId: Int,
+) {
+    /**
+     * The undo group the move commits under. Outside the constructor on purpose: two targets
+     * at the same place are the same target, whichever press queued them.
+     */
+    var group: Long? = null
+}
+
+/**
+ * Undo groups: every edit committed under one id in a row is one undo step. Shared by the
+ * editor's view models so two of them can never hand out the same id.
+ */
+internal object EditGroups {
+    private val last = AtomicLong()
+    fun next(): Long = last.incrementAndGet()
+}
+
+/** A colour waiting for the save in progress, for the widget that was selected then. */
+private data class QueuedColour(val globalIndex: Int, val colorArgb: Int?, val group: Long)
+
+/** "Undid move", shown once after an undo or a redo. */
+data class HistoryNotice(val id: Long, val undone: Boolean, val kind: EditKind)
+
+/**
+ * Text being placed as a picture. [wanted] is what the card asks for and [drawn] what the
+ * face shows; they differ while it is drawn again, and Add waits for them to agree.
+ *
+ * Its size is the font's, so a pinch and Placement's −/+ draw it again at a new size rather
+ * than resample it, and it is added at 100%.
+ */
+data class PendingText(
+    val wanted: TextPicture,
+    val drawn: TextPicture,
+    /** Why [wanted] was not drawn; the face still shows [drawn]. */
+    val problem: TextProblem? = null,
+    /** The label it replaces when added, which goes to the Removed list. */
+    val replacing: WidgetGuide? = null,
+    /** A pinch's size before rounding, so a slow pinch adds up instead of rounding away. */
+    val pinchSize: Float = wanted.sizePx.toFloat(),
+) {
+    val ready: Boolean get() = problem == null && wanted == drawn
+}
+
+/**
+ * The clock being drawn in another font before it is applied (Stage 9b). [wanted] is what the
+ * page asks for; [preview] is the face the repository drew for [drawn], the last request that
+ * finished. Apply waits for the two to agree.
+ *
+ * The page opens with no [font]: until one is chosen nothing is drawn, the face is the clock
+ * as it is, and there is nothing to apply. Opening on a font of the page's own choosing showed
+ * a face that looked changed before anything was asked for.
+ */
+data class PendingClockFont(
+    val font: TextFont? = null,
+    val parts: Set<ClockPart>,
+    /** One colour for every part, or null for each part's own. */
+    val tint: Int? = null,
+    val applyToAllStyles: Boolean = false,
+    /** The parts the selected style draws as pictures, in order; [parts] are some of them. */
+    val available: List<ClockPart>,
+    /** The font the clock was redrawn in, named until another is chosen; null for the face's own. */
+    val current: ClockFontName? = null,
+    val drawn: ClockFontRequest? = null,
+    val preview: ClockFontPreview? = null,
+    /** Why [wanted] was not drawn; the face shows [drawn]. */
+    val problem: String? = null,
+) {
+    /** What the page asks the repository for, once a font is chosen. */
+    val wanted: ClockFontRequest? get() = font?.let { ClockFontRequest(it, parts, tint, applyToAllStyles) }
+    val ready: Boolean get() = problem == null && preview != null && wanted != null && drawn == wanted
+}
+
+/**
+ * A picked picture being placed on the face before it is added: the Widgets page's
+ * counterpart of a pending background, placed with the same controls.
+ *
+ * [zoom] runs continuously under a pinch, as a background's does; the size it adds at is the
+ * rung of the picture's own resize ladder nearest to it ([size]), so what is added is a size
+ * Smaller and Larger can come back to.
+ */
+data class PendingPicture(
+    val prepared: PreparedPicture,
+    val zoom: Float,
+    /** Its centre, in panel pixels. */
+    val centreX: Float,
+    val centreY: Float,
+    /** The colour it is recoloured to ([tintedColor]), or null for its own. */
+    val tint: Int? = null,
+    /**
+     * A GIF or video clip being placed as a moving picture: its frames and the step kept.
+     * [prepared] is its first frame then, so the face, the size ladder and the colour work
+     * exactly as for a still picture; Add commits the frames instead.
+     */
+    val animation: PendingAnimation? = null,
+    /** Text being placed as a picture: [prepared] is it drawn, and [zoom] stays at 100%. */
+    val text: PendingText? = null,
+) {
+    val size: WidgetSize get() = prepared.ladder.minBy { abs(it.percentOfOriginal - zoom * 100) }
+    val left: Int get() = (centreX - size.width / 2f).roundToInt()
+    val top: Int get() = (centreY - size.height / 2f).roundToInt()
+    /** What it adds to the face, exactly: [pictureAddedBytes], or [animationAddedBytes] for its kept frames, at [size]. */
+    val addedBytes: Int get() = animation?.plan?.let { plan ->
+        animationAddedBytes(plan.frames.size, plan.table.size, size.width, size.height)
+    } ?: pictureAddedBytes(size.width, size.height, prepared.opaque)
+
+    /** The placement the shared controls read: its rung, and its centre's offset from the panel's. */
+    fun placement(panelWidth: Int, panelHeight: Int) = ImagePlacement(
+        zoom = size.percentOfOriginal / 100f,
+        offsetX = (centreX - panelWidth / 2f) / panelWidth.coerceAtLeast(1),
+        offsetY = (centreY - panelHeight / 2f) / panelHeight.coerceAtLeast(1),
+        tint = tint,
+    )
+}
+
+/** A picture was just added: the screen moves to the face to show it, once. */
+data class PictureAdded(val id: Long)
+
+/** Which variant's widget a queued move targets — see [PendingWidgetTarget]. */
+private data class PendingMoveKey(val variantBasename: String, val globalIndex: Int)
+
+/**
+ * Display position of a stored coordinate, and its inverse.
+ *
+ * A widget's coordinates are measured from [WidgetGuide.originX]/[WidgetGuide.originY],
+ * so both directions are one addition. The pair used to infer the anchoring from the
+ * sign of the value, which broke a nudge in a way worth remembering: a widget stored at
+ * `x = 0` stepped one pixel left reaches `-1`, and the sign rule read that as "anchored
+ * to the far edge" and threw the widget across the face.
+ */
+internal fun storedToDisplay(stored: Int, origin: Int): Int = origin + stored
+
+internal fun displayToStored(display: Int, origin: Int): Int = display - origin
+
+/** A copy was made and named. The screen turns it into a sentence. */
+data class DuplicateNotice(val id: Long, val name: String)
+
+/** What a set of widgets can have done to all of them at once. Moves go through the nudge. */
+enum class SelectionAction { DUPLICATE, REMOVE }
+
+/**
+ * A set edit that stopped partway. Each widget is its own commit, so the ones before the
+ * failure are done and saved — and the screen has to say how many, in words, rather than
+ * show a bare error over a face that visibly changed.
+ */
+data class SelectionStop(
+    val id: Long,
+    val action: SelectionAction,
+    val done: Int,
+    val total: Int,
+    val reason: String,
+)
+
+/**
+ * A picked GIF or video being placed, and what is kept of it.
+ *
+ * [read] is every frame read: all of a GIF, or the part of a video read last. [part] is the
+ * part kept ([AnimationParts]) — of a GIF long enough to cut, or of a video, always inside what
+ * is read — and [source] its frames; null keeps all of [read]. Every [step]th frame of it is
+ * kept, played as [plan] times it. [longestMs] is the longest part that fitted when it was
+ * last fitted, how far Longer goes. [fittingStep] is the smallest step a GIF too short to cut
+ * fits at, which More stops at.
+ */
+data class PendingAnimation(
+    val read: AnimationSource,
+    val step: Int,
+    val fittingStep: Int,
+    val part: VideoClip? = read.clip ?: read.takeIf(AnimationParts::cuttable)?.let(AnimationParts::whole),
+    val longestMs: Int = part?.lengthMs ?: 0,
+) {
+    val isVideo: Boolean get() = read.clip != null
+    val source: AnimationSource = part?.let { AnimationParts.cut(read, it) } ?: read
+    val plan: AnimationPlan = source.plan(step)
+
+    /**
+     * What Fewer and More move between: down to every frame when the part shrinks to fit, up
+     * to one frame of all a part can hold; a GIF too short to cut no lower than fits it.
+     */
+    val steps: IntRange get() {
+        val clip = read.clip
+        val most = when {
+            clip != null -> (minOf(clip.maxLengthMs, clip.durationMs) + VideoClip.FRAME_MS - 1) / VideoClip.FRAME_MS
+            else -> read.frames.size
+        }
+        return (if (part == null) fittingStep else 1)..maxOf(most, 1)
+    }
+}
+
+/** Said when not one frame of a picked GIF or video fits on the face, as a background or as a picture. */
+private fun noRoomForFrames(picture: Boolean = false) = WatchFaceException(
+    "There is no room on this face for even one frame of a moving " +
+        (if (picture) "picture this size" else "background") + ". Delete unused styles to make room.",
+)
+
+/** What a fitted part has to fit in: [room] bytes, at [width] × [height] a frame. */
+private data class Fitting(val room: Long, val width: Int, val height: Int)
+
+/**
+ * A pending animation fitted again: ready now, or a part of its video still to read — the
+ * window to read and cut to fit exactly when [Read.fitting] is given, read as it is when not.
+ */
+private sealed interface Refit {
+    data class Ready(val pending: PendingAnimation) : Refit
+    data class Read(
+        val part: VideoClip,
+        val step: Int,
+        val longestMs: Int,
+        val fitting: Fitting? = null,
+    ) : Refit
+}
+
+
+data class EditorUiState(
+    val snapshot: EditorSnapshot? = null,
+    val isWorking: Boolean = true,
+    val fit: ImageFit = ImageFit.COVER,
+    val pendingImage: ReplacementImage? = null,
+    val placement: ImagePlacement = ImagePlacement(),
+    /**
+     * A GIF being placed as a moving background. [pendingImage] holds its first frame at the
+     * same time, so the face, the placement controls and Discard work exactly as for a still
+     * picture; Add commits this instead.
+     */
+    val pendingAnimation: PendingAnimation? = null,
+    /** A GIF or video is being read for a moving background or picture; the page says so. */
+    val readingFrames: Boolean = false,
+    /** A picture being placed from the Widgets page; see [PendingPicture]. */
+    val pendingPicture: PendingPicture? = null,
+    /** The clock being drawn in another font, from the Widgets page; see [PendingClockFont]. */
+    val pendingClockFont: PendingClockFont? = null,
+    /**
+     * How many picture, text and clock-font choices have started on the Widgets page.
+     *
+     * A counter, like [widgetRemovals], so the screen can go to a choice each time one starts.
+     * Going there when "something is pending" became true missed every start after the first:
+     * back on the Canvas with a choice left open, a new one replaced it and nothing changed
+     * from false to true, so the button seemed to do nothing.
+     */
+    val widgetsChoicesStarted: Int = 0,
+    val pictureAdded: PictureAdded? = null,
+    val selectedWidgetIndex: Int? = null,
+    /**
+     * Selection mode, in pick order: one or more items, or empty when inactive.
+     * A singleton stays in this mode until Clear, so the next tap can add an item.
+     * [selectedWidgetIndex] is null whenever selection mode is active.
+     */
+    val multiSelection: List<Int> = emptyList(),
+    /** A set edit stopped partway; see [SelectionStop]. */
+    val selectionStopped: SelectionStop? = null,
+    /**
+     * How many widget removals have committed.
+     *
+     * A counter and not a flag: the screen acts on it *changing*, which is what makes it
+     * safe to act on at all. The obvious rule — "the Inspector has no widget, so leave" —
+     * races the opposite way: `page` is local Compose state and updates synchronously, while
+     * the selection arrives through `collectAsStateWithLifecycle` a frame later, so tapping
+     * a widget in the list would land on an Inspector that had not been told which widget
+     * yet and bounce straight back.
+     */
+    val widgetRemovals: Int = 0,
+    /**
+     * The project this editor was showing has been deleted, so the screen has to leave.
+     *
+     * One-way: nothing after it can act on the project, and clearing it would only give the
+     * editor a chance to draw a session that no longer exists.
+     */
+    val projectDeleted: Boolean = false,
+    /**
+     * A copy of this project was just made, and nothing on this screen changed to show it —
+     * the editor stays on the original, which is what you were working on.
+     *
+     * Carries the name rather than a finished sentence, so the wording stays in
+     * `strings.xml` with the rest of the editor's copy.
+     */
+    val duplicated: DuplicateNotice? = null,
+    /** What the last undo or redo did, for its snackbar. */
+    val historyNotice: HistoryNotice? = null,
+    /**
+     * Whether a widget edit reaches every style that has the same widget. **Off until asked
+     * for.** Each style carries its own copy of the artwork, so an edit that grows it — a
+     * larger widget, a duplicate that brings frames — costs its bytes once per style it
+     * reaches: on a four-style face, four times the room under the 4 MiB the watch accepts,
+     * for styles the reader may never install. Widening an edit is the tray's scope toggle.
+     */
+    val applyWidgetEditsToAllStyles: Boolean = false,
+    /**
+     * A background edit writes the selected style alone rather than every style. On by
+     * default, as every other edit is: replacing one style's picture used to replace every
+     * style's, so a face could not keep a background a style. See
+     * [EditorSnapshot.offersBackgroundScope].
+     */
+    val backgroundThisStyleOnly: Boolean = true,
+    val previewReviewed: Boolean = false,
+    val pendingWidgetMove: WidgetMovePreview? = null,
+    /**
+     * Where every member of a set being nudged is headed, all at once.
+     *
+     * The commits are still one widget each, through the same worker as any move, and a
+     * commit is slower than a held arrow repeats. With only [pendingWidgetMove] to draw
+     * from, the canvas could show one member gliding while the rest waited for their own
+     * commits, so a set stuttered across the face one widget at a time and never seemed to
+     * accelerate together. This holds every member's target, updated on each step, and the
+     * canvas draws all of them from it until the last commit has caught up.
+     */
+    val pendingSetMove: List<WidgetMovePreview> = emptyList(),
+    val directInstall: DirectInstallState = DirectInstallState(),
+    val error: UserMessage? = null,
+    val capacity: dev.fitface.studio.core.model.ContainerCapacity? = null,
+    /** The pasteable report, non-null while the dialog is open. */
+    val diagnosticsReport: String? = null,
+)
+
+@HiltViewModel
+class EditorViewModel @Inject constructor(
+    private val repository: WatchFaceRepository,
+    private val directInstaller: Fit3DirectInstaller,
+    private val diagnostics: DiagnosticsLog,
+    private val reporter: DiagnosticsReporter,
+) : ViewModel() {
+    private val mutableState = MutableStateFlow(EditorUiState())
+    val state = mutableState.asStateFlow()
+    private var loadedProjectId: Long? = null
+    private val messageIds = AtomicLong()
+
+    /** The group a nudge press commits under; a new press starts a new one. */
+    private var nudgeGroup: Long = EditGroups.next()
+
+    /**
+     * A quick-colour choice that arrived while another edit was saving: the latest wins and
+     * is saved as soon as the save ends, so a drag released mid-save is not lost.
+     */
+    private var queuedColour: QueuedColour? = null
+
+    /** The coroutine committing queued moves, while there is one. Undo waits for it. */
+    private var moveWorker: Job? = null
+    // Move targets waiting to be committed, in the order their widgets were first queued.
+    //
+    // Every widget move — dragged or nudged — goes through here. A commit is a reparse, a
+    // revalidate and a preview recompose, which is slower than a repeat fires and slower
+    // than a second gesture starts, so the latest target per widget is committed and the
+    // intermediate positions are dropped. That coalescing is the point of the design; it
+    // is not a queue of one commit per tick.
+    //
+    // It has to be a map. As a single slot keyed by one global index, a target queued for
+    // widget A and then replaced by one for widget B lost A's move outright, so two
+    // back-to-back drags of different widgets only landed the second. Access is guarded
+    // because the worker drains it from its own coroutine.
+    private val pendingMoves = LinkedHashMap<PendingMoveKey, PendingWidgetTarget>()
+    // Taking a target out of the queue must not forget its position while the save
+    // suspends. Repeats build on the newest queued target, then this in-flight one,
+    // and only then the committed snapshot. Guarded by pendingMoves as well.
+    private var inFlightMove: Pair<PendingMoveKey, PendingWidgetTarget>? = null
+    /** Whether a worker is committing [pendingMoves]. Guarded by that map's own lock. */
+    private var moveWorkerDraining = false
+
+    init {
+        // A Photos request's result is not this page's to show.
+        directInstaller.clearOtherResult(album = false)
+        // A video's frames are cached on disk while it is placed: whenever the read in use
+        // changes — picked, read again, added, discarded, a still picked instead — every other
+        // read's frames go. The first answer, nothing, clears what an earlier editor left.
+        viewModelScope.launch {
+            mutableState.map { it.pendingAnimation?.read ?: it.pendingPicture?.animation?.read }
+                .distinctUntilChanged { old, new -> old === new }
+                .collect(repository::releaseVideoFrames)
+        }
+        viewModelScope.launch {
+            repository.observeImageFit().collect { fit ->
+                mutableState.value = mutableState.value.copy(fit = fit)
+            }
+        }
+        viewModelScope.launch {
+            var lastPhase: DirectInstallPhase? = null
+            var lastReplies = emptyList<String>()
+            var lastAnswers = emptyList<String>()
+            directInstaller.state.collect { delivery ->
+                // Received protocol bytes, logged once each as they arrive: on the coexistence
+                // route nothing is expected here, so any entry is news worth a line.
+                if (delivery.watchReplies != lastReplies) {
+                    delivery.watchReplies.filterNot(lastReplies::contains)
+                        .forEach { diagnostics.info(TAG, "Watch reply", it) }
+                    lastReplies = delivery.watchReplies
+                }
+                // Which agent answered a discovery, and which never did, is what tells an
+                // unanswered consent prompt from a watch that is not connected.
+                if (delivery.discoveryAnswers != lastAnswers) {
+                    delivery.discoveryAnswers.filterNot(lastAnswers::contains)
+                        .forEach { diagnostics.info(TAG, "Discovery answer", it) }
+                    lastAnswers = delivery.discoveryAnswers
+                }
+                // Physical delivery cannot be exercised in this repository's tests, so the
+                // phase order a real transfer walked is the only account of where one
+                // stopped. Counts and booleans only — no peer handle, address or name.
+                if (delivery.phase != lastPhase) {
+                    lastPhase = delivery.phase
+                    diagnostics.info(
+                        TAG,
+                        "Install phase ${delivery.phase}",
+                        "bytes=${delivery.acknowledgedBytes}/${delivery.totalBytes} " +
+                            "windows=${delivery.acknowledgedWindows}/${delivery.totalWindows}" +
+                            (delivery.failure?.let { " failure=$it" } ?: ""),
+                    )
+                }
+                mutableState.value = mutableState.value.copy(directInstall = delivery)
+            }
+        }
+        refreshDirectInstallEnvironment()
+    }
+
+    /**
+     * Shows [projectId]: the session the library (or a new project, template or archive)
+     * has just opened, or, with none open for it — after the process was killed, say — a
+     * fresh open. Every route here opens first, so opening again doubled the wait: two full
+     * loads of the package and checkpoint for one tap.
+     */
+    fun loadProject(projectId: Long) {
+        if (loadedProjectId == projectId && mutableState.value.snapshot != null) return
+        loadedProjectId = projectId
+        operate { repository.openedProject(projectId) ?: repository.openProject(projectId) }
+    }
+
+    /**
+     * Renames the open project.
+     *
+     * Not an `operate {}`: a rename touches one column and no container, so it must not put
+     * the editor into its working state or produce a new snapshot through the commit path.
+     * The repository updates the open session in place, and the reload below is what carries
+     * the new name onto this screen.
+     */
+    fun renameProject(name: String) {
+        val projectId = loadedProjectId ?: return
+        viewModelScope.launch {
+            runCatching {
+                repository.renameProject(projectId, name)
+                repository.currentSnapshot()
+            }.onSuccess { snapshot ->
+                mutableState.value = mutableState.value.copy(snapshot = snapshot)
+            }.onFailure(::showFailure)
+        }
+    }
+
+    /**
+     * Deletes the open project and asks the screen to leave.
+     *
+     * The repository drops the row, the directory and — because this is the open one — the
+     * session, so there is nothing left for this ViewModel to show. The flag is what the
+     * route navigates on; it is never cleared, because the only thing that happens after it
+     * is set is going back.
+     */
+    fun deleteProject() {
+        val projectId = loadedProjectId ?: return
+        viewModelScope.launch {
+            runCatching { repository.deleteProject(projectId) }
+                .onSuccess {
+                    mutableState.value = mutableState.value.copy(projectDeleted = true)
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    /**
+     * Copies this project and stays on it.
+     *
+     * Deliberately does not open the copy: you are in the middle of the original, and
+     * switching out from under an edit is worse than having to go and find the new one. The
+     * message is the only feedback there can be, for the same reason.
+     */
+    fun duplicateProject() {
+        val projectId = loadedProjectId ?: return
+        // Copying a package can be tens of megabytes, and the button says nothing while it
+        // runs. Without the guard a second tap — which is what someone does when a control
+        // appears to have done nothing — makes a second copy they then have to find and
+        // delete. `isWorking` is the editor's existing "busy" flag, so the page's other
+        // actions dim with it; `showFailure` clears it on the way out.
+        if (mutableState.value.isWorking) return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true)
+            runCatching { repository.duplicateProject(projectId) }
+                .onSuccess { duplicate ->
+                    mutableState.value = mutableState.value.copy(
+                        isWorking = false,
+                        duplicated = DuplicateNotice(
+                            messageIds.incrementAndGet(),
+                            duplicate.name,
+                        ),
+                    )
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    fun clearDuplicated(id: Long) {
+        val current = mutableState.value
+        if (current.duplicated?.id == id) {
+            mutableState.value = current.copy(duplicated = null)
+        }
+    }
+
+    /**
+     * Switches what the canvas shows and edits — a numbered style or `aod.bin`.
+     *
+     * A pending background image is dropped rather than carried across: it was decoded
+     * and framed against whichever variant's panel was on screen when it was prepared, so
+     * applying it after a switch would place a style's draft background onto AOD, or the
+     * reverse. Dropping it here is simpler and stricter than carrying it and checking its
+     * origin later.
+     */
+    fun selectVariant(variant: EditorVariant) {
+        mutableState.value = mutableState.value.copy(
+            capacity = null,
+            selectedWidgetIndex = null,
+            // A global index means something different in every entry.
+            multiSelection = emptyList(),
+            previewReviewed = false,
+            pendingImage = null,
+            pendingAnimation = null,
+            // Never carried into AOD. The repository already refuses to let it reach
+            // AOD, but leaving the switch on would still *read* as though it applied —
+            // in the canvas hint, in the remove-confirmation body, anywhere that asks
+            // this flag without also asking what is selected.
+            applyWidgetEditsToAllStyles = when (variant.kind) {
+                VariantKind.AOD -> false
+                VariantKind.STYLE -> mutableState.value.applyWidgetEditsToAllStyles
+            },
+        )
+        operate { repository.currentSnapshot(variant.basename) }
+    }
+
+    fun selectWidget(globalIndex: Int?) {
+        // With a set picked, a tap changes the set: on a widget it toggles that widget, on
+        // bare canvas it lets go of all of them — the same two gestures the import picker
+        // uses, so choosing several is learned once.
+        if (mutableState.value.multiSelection.isNotEmpty()) {
+            if (globalIndex == null) clearSelection() else toggleInSelection(globalIndex)
+            return
+        }
+        val imported = mutableState.value.snapshot?.widgets?.singleOrNull { it.globalIndex == globalIndex }
+            ?.addedKind != null
+        mutableState.value = mutableState.value.copy(selectedWidgetIndex = globalIndex,
+            applyWidgetEditsToAllStyles = !imported && mutableState.value.applyWidgetEditsToAllStyles)
+    }
+
+    /** Hold or the labelled selection action enters the mode without toggling the item off. */
+    fun beginSelection(globalIndex: Int) {
+        val current = mutableState.value
+        val snapshot = current.snapshot ?: return
+        if (current.isWorking || snapshot.widgets.none { it.globalIndex == globalIndex }) return
+        val base = current.multiSelection.ifEmpty { listOfNotNull(current.selectedWidgetIndex) }
+        mutableState.value = current.copy(
+            multiSelection = (base + globalIndex).distinct(), selectedWidgetIndex = null,
+        )
+    }
+
+    /** A tap toggles membership; a remaining singleton still accepts the next tap. */
+    fun toggleInSelection(globalIndex: Int) {
+        val current = mutableState.value
+        val snapshot = current.snapshot ?: return
+        if (current.isWorking || snapshot.widgets.none { it.globalIndex == globalIndex }) return
+        val base = current.multiSelection.ifEmpty { listOfNotNull(current.selectedWidgetIndex) }
+        val next = if (globalIndex in base) base - globalIndex else base + globalIndex
+        mutableState.value = current.copy(multiSelection = next, selectedWidgetIndex = null)
+    }
+
+    fun clearSelection() {
+        if (mutableState.value.isWorking) return
+        mutableState.value = mutableState.value.copy(
+            multiSelection = emptyList(),
+            selectedWidgetIndex = null,
+        )
+    }
+
+    fun clearSelectionStopped(id: Long) {
+        if (mutableState.value.selectionStopped?.id == id) {
+            mutableState.value = mutableState.value.copy(selectionStopped = null)
+        }
+    }
+
+    /**
+     * Moves every widget of the set by the same step, through the same queue a single
+     * nudge uses — one target per widget, each committed by the one worker.
+     *
+     * The step is shared, and it is as far as the most constrained widget can go: each
+     * member is clamped to the panel exactly as a lone nudge would clamp it, and the set
+     * takes the smallest of those steps. Clamping each on its own would let a widget at the
+     * edge stop while the rest carried on, shearing the arrangement the reader built.
+     */
+    fun nudgeSelection(deltaX: Int, deltaY: Int) {
+        val current = mutableState.value
+        val snapshot = current.snapshot ?: return
+        val variant = snapshot.selectedVariant.basename
+        val moves = current.multiSelection
+            .mapNotNull { index -> snapshot.widgets.firstOrNull { it.globalIndex == index } }
+            .filter { it.canEditPosition }
+            .map { widget ->
+                val base = pendingTarget(variant, widget.globalIndex)
+                    ?: PendingWidgetTarget(widget.x, widget.y, widget.type, widget.sequenceId)
+                Triple(widget, base, clampToPanel(snapshot, widget, base.x + deltaX, base.y + deltaY))
+            }
+        if (moves.isEmpty()) return
+        val stepX = sharedNudgeStep(moves.map { (_, base, next) -> next.x - base.x }, deltaX)
+        val stepY = sharedNudgeStep(moves.map { (_, base, next) -> next.y - base.y }, deltaY)
+        if (stepX == 0 && stepY == 0) return
+        val targets = moves.map { (widget, base, _) -> Triple(widget, base.x + stepX, base.y + stepY) }
+        if (targets.any { (_, x, y) -> x !in Short.MIN_VALUE..Short.MAX_VALUE || y !in Short.MIN_VALUE..Short.MAX_VALUE }) {
+            return
+        }
+        // A press that lands while the last one's members are still committing joins its undo
+        // step: the members it re-targets would otherwise commit under the new one, and undoing
+        // that would leave the set apart, the members already committed moved and the rest not.
+        val group = moves.firstNotNullOfOrNull { (_, base, _) -> base.group } ?: nudgeGroup
+        targets.forEach { (widget, x, y) -> queueWidgetMove(snapshot, widget, x, y, previewAlone = false, group = group) }
+        // Published once, for every member, after they are all queued: the canvas moves the
+        // set as one picture on this step, whatever order the commits then land in.
+        mutableState.value = mutableState.value.copy(
+            pendingSetMove = targets.map { (widget, x, y) ->
+                WidgetMovePreview(
+                    globalIndex = widget.globalIndex,
+                    displayX = storedToDisplay(x, widget.originX).toFloat(),
+                    displayY = storedToDisplay(y, widget.originY).toFloat(),
+                )
+            },
+        )
+    }
+
+    fun duplicateSelection() = runOnSelection(SelectionAction.DUPLICATE)
+
+    fun removeSelection() = runOnSelection(SelectionAction.REMOVE)
+
+    /**
+     * Duplicates or removes every widget of the set, one at a time, through the same
+     * single-widget repository call the tray's own buttons make. Nothing below this knows
+     * a set exists.
+     *
+     * Removal goes **highest index first**. Removing a widget renumbers only the ones after
+     * it, so taking them from the top leaves every index still to go naming the widget it
+     * was picked as. Duplicates append at the end and renumber nothing, so they go in pick
+     * order, which is the order the copies stack in.
+     *
+     * **There is no rollback across commits** — the same honest limit as importing a set.
+     * It stops at the first refusal, keeps what committed, publishes the snapshot that
+     * produced, and says how far it got.
+     */
+    private fun runOnSelection(action: SelectionAction) {
+        val start = mutableState.value
+        val snapshot = start.snapshot ?: return
+        if (start.isWorking || start.multiSelection.isEmpty()) return
+        val order = when (action) {
+            SelectionAction.REMOVE -> start.multiSelection.sortedDescending()
+            SelectionAction.DUPLICATE -> start.multiSelection
+        }
+        val variant = snapshot.selectedVariant.basename
+        val allStyles = start.applyWidgetEditsToAllStyles
+        // One undo step for the whole set, however many commits it takes.
+        val group = EditGroups.next()
+        viewModelScope.launch {
+            // A structural edit renumbers global indices and a queued move names one, the
+            // reason `operate` drops them too.
+            clearPendingMoves()
+            mutableState.value = mutableState.value.copy(
+                isWorking = true,
+                pendingWidgetMove = null,
+                pendingSetMove = emptyList(),
+                previewReviewed = false,
+                capacity = null,
+                error = null,
+            )
+            var latest = snapshot
+            val copies = mutableListOf<Int>()
+            var done = 0
+            var failure: Throwable? = null
+            for (index in order) {
+                val widget = latest.widgets.firstOrNull { it.globalIndex == index }
+                if (widget == null) {
+                    failure = WatchFaceException("A selected widget is no longer on the face.")
+                    break
+                }
+                try {
+                    latest = when (action) {
+                        SelectionAction.DUPLICATE -> repository.duplicateWidget(
+                            variant, widget.globalIndex, widget.type, widget.sequenceId,
+                            widget.x, widget.y, applyToAllStyles = allStyles, group = group,
+                        )
+                        SelectionAction.REMOVE -> repository.removeWidget(
+                            variant, widget.globalIndex, widget.type, widget.sequenceId,
+                            widget.x, widget.y, requireFinal = false, applyToAllStyles = allStyles,
+                            group = group,
+                        )
+                    }
+                    if (action == SelectionAction.DUPLICATE) {
+                        latest.widgets.maxByOrNull { it.ordinal }?.globalIndex?.let(copies::add)
+                    }
+                    done++
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    failure = error
+                    break
+                }
+            }
+            if (done == 0) {
+                failure?.let(::showFailure)
+                return@launch
+            }
+            directInstaller.payloadChanged()
+            val remaining = order.drop(done)
+            val selection = when {
+                // The copies sit exactly on their originals, so they are what the arrows
+                // should move next.
+                action == SelectionAction.DUPLICATE && failure == null -> copies
+                action == SelectionAction.DUPLICATE -> start.multiSelection
+                // What was not removed keeps its index, because removal went from the top.
+                else -> start.multiSelection.filter { it in remaining }
+            }
+            mutableState.value = mutableState.value.copy(
+                snapshot = latest,
+                isWorking = false,
+                pendingWidgetMove = null,
+                pendingSetMove = emptyList(),
+                multiSelection = selection,
+                selectedWidgetIndex = null,
+                widgetRemovals = mutableState.value.widgetRemovals +
+                    if (action == SelectionAction.REMOVE) done else 0,
+                selectionStopped = failure?.let { error ->
+                    diagnostics.warn(TAG, "Set edit stopped", (error as? WatchFaceException)?.technicalDetail, error)
+                    SelectionStop(
+                        id = messageIds.incrementAndGet(),
+                        action = action,
+                        done = done,
+                        total = order.size,
+                        reason = (error as? WatchFaceException)?.userMessage
+                            ?: error.message?.takeIf(String::isNotBlank)
+                            ?: "The operation could not be applied",
+                    )
+                },
+            )
+        }
+    }
+
+    fun acceptWidgetImport(snapshot: EditorSnapshot) = acceptImport(snapshot, selectLastWidget = true)
+
+    fun acceptBackgroundImport(snapshot: EditorSnapshot) = acceptImport(snapshot, selectLastWidget = false)
+
+    /** Deletion is already committed. Keep any pending image and placement for a fresh review. */
+    fun acceptStyleDeletion(snapshot: EditorSnapshot) {
+        if (snapshot.projectId != mutableState.value.snapshot?.projectId) return
+        val previous = mutableState.value.snapshot
+        val sameVariant = previous?.originalVariants?.get(previous.selectedVariant.basename) ==
+            snapshot.originalVariants[snapshot.selectedVariant.basename]
+        clearPendingMoves()
+        directInstaller.payloadChanged()
+        mutableState.value = mutableState.value.copy(snapshot = snapshot,
+            selectedWidgetIndex = mutableState.value.selectedWidgetIndex.takeIf { sameVariant },
+            multiSelection = mutableState.value.multiSelection.takeIf { sameVariant }.orEmpty(),
+            pendingWidgetMove = null, pendingSetMove = emptyList(),
+            previewReviewed = false, capacity = null, error = null)
+    }
+
+    private fun acceptImport(snapshot: EditorSnapshot, selectLastWidget: Boolean) {
+        if (snapshot.projectId != mutableState.value.snapshot?.projectId) return
+        mutableState.value = mutableState.value.copy(snapshot = snapshot,
+            multiSelection = emptyList(),
+            selectedWidgetIndex = snapshot.widgets.lastOrNull()?.globalIndex?.takeIf { selectLastWidget },
+            pendingImage = mutableState.value.pendingImage.takeIf { selectLastWidget },
+            applyWidgetEditsToAllStyles = false, previewReviewed = false, pendingWidgetMove = null,
+            pendingSetMove = emptyList())
+    }
+
+    fun setBackgroundThisStyleOnly(value: Boolean) {
+        mutableState.value = mutableState.value.copy(backgroundThisStyleOnly = value)
+    }
+
+    fun setApplyWidgetEditsToAllStyles(value: Boolean) {
+        if (value && mutableState.value.snapshot?.widgets?.singleOrNull {
+            it.globalIndex == mutableState.value.selectedWidgetIndex
+        }?.addedKind != null) return
+        mutableState.value = mutableState.value.copy(applyWidgetEditsToAllStyles = value)
+    }
+
+    /**
+     * Records that the validated preview has been looked at, which is what unlocks
+     * install. Every commit clears it again, so the Validate page re-marks it.
+     */
+    fun markPreviewReviewed() {
+        if (mutableState.value.previewReviewed) return
+        mutableState.value = mutableState.value.copy(previewReviewed = true)
+    }
+
+    fun selectFit(value: ImageFit) {
+        val state = mutableState.value
+        // A new fit re-centres the image; its colour is not placement and stays.
+        val placement = centeredPlacement(value).copy(tint = state.placement.tint)
+        // A moving background's fit that would leave no room for a frame is greyed out.
+        if (!movingBackgroundMayGo(state.placement, placement)) return
+        // Native is a moving background's own fit: still backgrounds and photos never open at it.
+        val remembered = value in ImageFit.STILL
+        mutableState.value = state.copy(
+            fit = if (remembered) value else state.fit,
+            placement = placement,
+        )
+        // A moving background's frames cost what they cover, so a new fit fits the longest
+        // part again at the frames kept.
+        state.pendingAnimation?.let { pending ->
+            refitBackground(pending, pending.step, pending.part?.startMs ?: 0)
+        }
+        if (remembered) {
+            viewModelScope.launch {
+                repository.setImageFit(value)
+            }
+        }
+    }
+
+    /**
+     * The one Add an image, GIF or video button's pick, as the background: a GIF or video is
+     * placed as a moving background, anything else as a still one. Either replaces a moving
+     * background the style already has once it is applied.
+     */
+    fun chooseBackground(uri: String, mimeType: String?) {
+        if (isMovingMedia(mimeType)) prepareMovingBackground(uri) else prepareBackground(uri)
+    }
+
+    /** The same button on the Widgets page: a GIF or video is placed as a moving picture, anything else as a picture. */
+    fun choosePicture(uri: String, mimeType: String?) {
+        if (isMovingMedia(mimeType)) prepareMovingPicture(uri) else preparePicture(uri)
+    }
+
+    fun prepareBackground(uri: String) {
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true, error = null)
+            runCatching { repository.prepareReplacementImage(uri) }
+                .onSuccess { image ->
+                    mutableState.value = mutableState.value.copy(
+                        pendingImage = image,
+                        placement = ImagePlacement(fit = mutableState.value.fit),
+                        isWorking = false,
+                    )
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    fun transformImage(zoomChange: Float, panX: Float, panY: Float) {
+        val placement = mutableState.value.placement
+        val moved = placement.copy(
+            offsetX = (placement.offsetX + panX).coerceIn(-MaxImageOffset, MaxImageOffset),
+            offsetY = (placement.offsetY + panY).coerceIn(-MaxImageOffset, MaxImageOffset),
+        )
+        val next = moved.copy(zoom = (placement.zoom * zoomChange).coerceIn(0.25f, 8f))
+        // A pinch past the room left keeps its pan; a drag that would cover more than fits stays.
+        placeBackground(listOf(next, moved).firstOrNull { movingBackgroundMayGo(placement, it) } ?: return)
+    }
+
+    /** Whether the moving background being placed, if any, may go from [before] to [after]; see [EditorSnapshot.movingBackgroundMayGo]. */
+    private fun movingBackgroundMayGo(before: ImagePlacement, after: ImagePlacement): Boolean {
+        val state = mutableState.value
+        val pending = state.pendingAnimation ?: return true
+        return state.snapshot?.movingBackgroundMayGo(pending, before, after) ?: true
+    }
+
+    /** Places the background being placed at [next], fitting a moving one's part again. */
+    private fun placeBackground(next: ImagePlacement) {
+        val before = mutableState.value.placement
+        mutableState.value = mutableState.value.copy(placement = next)
+        keepBackgroundFitting(before)
+    }
+
+    /**
+     * A moving background's frames cost the panel area they cover, so when a pinch, a drag
+     * partly off the face, Size or Reset changes it from [before], its part is fitted again —
+     * longer when it covers less, shorter when more — from where it starts, at the frames kept.
+     * Cut from what is read, never read again, so a pinch stays smooth.
+     */
+    private fun keepBackgroundFitting(before: ImagePlacement) {
+        val state = mutableState.value
+        val pending = state.pendingAnimation ?: return
+        val snapshot = state.snapshot ?: return
+        fun area(placement: ImagePlacement) = movingBackgroundBounds(pending.read.width, pending.read.height,
+            snapshot.preview.width, snapshot.preview.height, placement)?.let { it.width to it.height }
+        if (area(before) == area(state.placement)) return
+        refitBackground(pending, pending.step, pending.part?.startMs ?: 0, mayRead = false)
+    }
+
+    /**
+     * Steps the pending image's zoom by whole percentage points, so the SIZE buttons are
+     * reversible where a multiplying factor was not. See [steppedZoom].
+     */
+    fun stepImageZoom(grow: Boolean) {
+        val placement = mutableState.value.placement
+        val zoom = steppedZoom(placement.zoom, grow)
+        if (zoom == placement.zoom) return
+        val next = placement.copy(zoom = zoom)
+        if (movingBackgroundMayGo(placement, next)) placeBackground(next)
+    }
+
+    /** Back to centred and unzoomed in the fit chosen; the colour chosen is not placement and stays. */
+    fun resetImagePlacement() {
+        val before = mutableState.value.placement
+        val next = ImagePlacement(fit = before.fit, tint = before.tint)
+        if (movingBackgroundMayGo(before, next)) placeBackground(next)
+    }
+
+    fun cancelBackground() {
+        mutableState.value = mutableState.value.copy(pendingImage = null, pendingAnimation = null)
+    }
+
+    /**
+     * Reads a picked GIF or video and starts placing it as a moving background: every frame,
+     * of the longest part from its start that fits ([AnimationParts]); a GIF too short to cut
+     * keeps every 2nd or 3rd frame instead when all do not fit. The room counts a moving
+     * background it would replace as free; a GIF of one frame is placed as the still picture
+     * it is. A video's part is chosen before it is read, so only that part is read.
+     */
+    fun prepareMovingBackground(uri: String) {
+        val snapshot = mutableState.value.snapshot ?: return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true, readingFrames = true, error = null)
+            try {
+                runCatching {
+                    val room = snapshot.roomForMovingBackground()
+                    val placement = ImagePlacement(fit = mutableState.value.fit)
+                    val probe = repository.probeVideo(uri)
+                    val video = probe?.let { video ->
+                        val bounds = movingBackgroundBounds(video.width, video.height,
+                            snapshot.preview.width, snapshot.preview.height, placement) ?: throw noRoomForFrames()
+                        readVideoPart(uri, VideoClip.opening(video.durationMs, video.maxLengthMs), 1,
+                            Fitting(room, bounds.width, bounds.height))?.takeIf { it.source.frames.size >= 2 }
+                            ?: throw noRoomForFrames()
+                    }
+                    Triple(video?.read ?: repository.readAnimation(uri), video, room)
+                }
+                    .onSuccess { (read, video, room) ->
+                        if (read.frames.size < 2) {
+                            if (read.clip == null) prepareBackground(uri)
+                            else showFailure(WatchFaceException("Only one frame of this video could be read."))
+                            return@onSuccess
+                        }
+                        val placement = ImagePlacement(fit = mutableState.value.fit)
+                        val bounds = movingBackgroundBounds(read.width, read.height,
+                            snapshot.preview.width, snapshot.preview.height, placement)
+                        // A video was read and cut to the part that fits; a GIF is cut to it now.
+                        val pending = video ?: bounds?.let { (refit(PendingAnimation(read, 1, 1), 1, 0, it.width, it.height, room)
+                            as? Refit.Ready)?.pending }
+                        if (pending == null) {
+                            showFailure(noRoomForFrames())
+                            return@onSuccess
+                        }
+                        mutableState.value = mutableState.value.copy(
+                            pendingImage = ReplacementImage(uri, pending.source.frames.first()),
+                            pendingAnimation = pending,
+                            placement = placement,
+                            isWorking = false,
+                        )
+                    }
+                    .onFailure(::showFailure)
+            } finally {
+                mutableState.value = mutableState.value.copy(readingFrames = false)
+            }
+        }
+    }
+
+    /**
+     * Keeps every [step]th frame: fewer frames, smaller and jerkier; more, smoother and larger.
+     * The part is fitted again for it, so fewer frames make room for a longer part.
+     */
+    fun setMovingBackgroundStep(step: Int) {
+        val pending = mutableState.value.pendingAnimation ?: return
+        if (step !in pending.steps || step == pending.step) return
+        refitBackground(pending, step, pending.part?.startMs ?: 0)
+    }
+
+    /** [pending] as a moving background fitted again at [step] from [startMs], as now placed. */
+    private fun refitBackground(pending: PendingAnimation, step: Int, startMs: Int, mayRead: Boolean = true) {
+        val state = mutableState.value
+        val snapshot = state.snapshot ?: return
+        val bounds = movingBackgroundBounds(pending.read.width, pending.read.height,
+            snapshot.preview.width, snapshot.preview.height, state.placement) ?: return
+        place(pending, refit(pending, step, startMs, bounds.width, bounds.height, snapshot.roomForMovingBackground(), mayRead))
+    }
+
+    /**
+     * Takes the background away: the selected style's moving one deleted and the still ones
+     * painted black, in the scope a replacement would take. Undo brings it back.
+     */
+    fun removeBackground() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val thisStyleOnly = mutableState.value.backgroundThisStyleOnly && snapshot.offersBackgroundScope
+        operate(onSuccess = { it.copy(previewReviewed = false) }) { repository.removeBackground(thisStyleOnly) }
+    }
+
+    /**
+     * The part kept of the GIF or video being placed: Earlier and Later move its start, and
+     * the longest part from there that fits is kept again; Shorter and Longer trim it by
+     * hand, Longer no further than [PendingAnimation.longestMs]. A video part not read yet is
+     * read; a GIF's is cut at once.
+     */
+    fun setAnimationPart(part: VideoClip) {
+        val state = mutableState.value
+        val picture = state.pendingPicture?.animation
+        val pending = picture ?: state.pendingAnimation ?: return
+        val current = pending.part ?: return
+        if (part == current) return
+        if (part.startMs != current.startMs) {
+            // A GIF's part starts on a frame near the half second asked for; aiming at the half
+            // second itself keeps Earlier and Later even, whatever its frames last.
+            val startMs = if (pending.isVideo) part.startMs
+            else (part.startMs + VideoClip.STEP_MS / 2) / VideoClip.STEP_MS * VideoClip.STEP_MS
+            if (picture != null) refitPicture(pending, pending.step, startMs) else refitBackground(pending, pending.step, startMs)
+            return
+        }
+        val trimmed = part.copy(lengthMs = minOf(part.lengthMs, maxOf(pending.longestMs, current.lengthMs)))
+        if (trimmed == current) return
+        val next = pending.copy(part = trimmed)
+        place(pending, if (AnimationParts.cut(pending.read, trimmed) != null) Refit.Ready(next)
+            else Refit.Read(trimmed, pending.step, pending.longestMs))
+    }
+
+    /**
+     * [pending] at [step] from [startMs], keeping the longest part that fits [room] at [width] ×
+     * [height]: cut from what is read, or a video part to read. A GIF too short to cut keeps
+     * all of itself at the smallest step that fits instead. Null when not one frame fits.
+     */
+    private fun refit(
+        pending: PendingAnimation,
+        step: Int,
+        startMs: Int,
+        width: Int,
+        height: Int,
+        room: Long,
+        /** False keeps to the frames read: a part that would need more is all of them from [startMs]. */
+        mayRead: Boolean = true,
+    ): Refit? {
+        val read = pending.read
+        val clip = read.clip
+        if (clip != null) {
+            val fitting = Fitting(room, width, height)
+            // What is read already from this start on is cut exactly, repeats counted; only a
+            // longer part than it holds, or a start outside it, is read.
+            val offset = startMs - clip.startMs
+            if (read.frames.size == clip.frames && offset >= 0 && offset % VideoClip.FRAME_MS == 0 && offset < clip.lengthMs) {
+                val rest = clip.copy(startMs = startMs, lengthMs = clip.lengthMs - offset)
+                val tail = read.slice(offset / VideoClip.FRAME_MS, read.frames.size, clip = rest)
+                val frames = AnimationParts.fittingFrames(tail, step, room, width, height) ?: return null
+                val limit = minOf(clip.maxLengthMs, clip.durationMs - startMs)
+                if (frames < tail.frames.size || rest.lengthMs >= limit) {
+                    val part = rest.copy(lengthMs = minOf(rest.lengthMs, frames * VideoClip.FRAME_MS))
+                    return Refit.Ready(pending.copy(step = step, part = part, longestMs = part.lengthMs))
+                }
+                // All of it from here fits; without reading, the part is all that is read.
+                if (!mayRead) return Refit.Ready(pending.copy(step = step, part = rest, longestMs = rest.lengthMs))
+            }
+            if (!mayRead) return null
+            // Everything read from here fits, or the start is outside it: read all one read
+            // takes from the start, and cut that.
+            return Refit.Read(VideoClip.window(clip.durationMs, startMs, clip.maxLengthMs), step, 0, fitting)
+        }
+        if (!AnimationParts.cuttable(read)) {
+            val fitting = animationStepThatFits(read, room, width, height) ?: return null
+            return Refit.Ready(pending.copy(step = maxOf(step, fitting), fittingStep = fitting, part = null, longestMs = 0))
+        }
+        val part = AnimationParts.longestGifPart(read, startMs, step, room, width, height) ?: return null
+        return Refit.Ready(pending.copy(step = step, part = part, longestMs = part.lengthMs))
+    }
+
+    /**
+     * Puts a fitted animation in the place [pending] holds — the background being placed or
+     * the moving picture — at once, or once its video part is read. Dropped when what is being
+     * placed has changed meanwhile.
+     */
+    private fun place(pending: PendingAnimation, refit: Refit?) {
+        fun put(next: PendingAnimation) {
+            val state = mutableState.value
+            val picture = state.pendingPicture
+            mutableState.value = when {
+                picture?.animation?.read?.uri == pending.read.uri -> state.copy(pendingPicture = picture.copy(
+                    prepared = picture.prepared.copy(preview = next.source.frames.first()), animation = next))
+                state.pendingAnimation?.read?.uri == pending.read.uri -> state.copy(
+                    pendingImage = ReplacementImage(next.read.uri, next.source.frames.first()), pendingAnimation = next)
+                else -> state
+            }
+        }
+        when (refit) {
+            null -> return
+            is Refit.Ready -> put(refit.pending)
+            is Refit.Read -> viewModelScope.launch {
+                mutableState.value = mutableState.value.copy(isWorking = true, readingFrames = true, error = null)
+                try {
+                    runCatching {
+                        val fitting = refit.fitting
+                        if (fitting == null) {
+                            PendingAnimation(repository.readAnimation(pending.read.uri, refit.part), refit.step, refit.step,
+                                longestMs = refit.longestMs)
+                        } else {
+                            readVideoPart(pending.read.uri, refit.part, refit.step, fitting)
+                                ?: throw noRoomForFrames(picture = mutableState.value.pendingPicture?.animation != null)
+                        }
+                    }
+                        .onSuccess { next ->
+                            put(next)
+                            mutableState.value = mutableState.value.copy(isWorking = false)
+                        }
+                        .onFailure(::showFailure)
+                } finally {
+                    mutableState.value = mutableState.value.copy(readingFrames = false)
+                }
+            }
+        }
+    }
+
+    /**
+     * The longest part of a video from [window]'s start that fits exactly: [window] read — all
+     * one read takes from there ([VideoClip.window]) — and cut to the frames that fit with
+     * repeats counted ([AnimationParts.fittingFrames]). Null when not one frame fits.
+     */
+    private suspend fun readVideoPart(uri: String, window: VideoClip, step: Int, fitting: Fitting): PendingAnimation? {
+        val read = repository.readAnimation(uri, window)
+        val clip = read.clip ?: return PendingAnimation(read, step, step)
+        val frames = AnimationParts.fittingFrames(read, step, fitting.room, fitting.width, fitting.height) ?: return null
+        val part = clip.copy(lengthMs = minOf(clip.lengthMs, frames * VideoClip.FRAME_MS))
+        return PendingAnimation(read, step, step, part = part, longestMs = part.lengthMs)
+    }
+
+    /**
+     * Reads a picked GIF or video and starts placing it as a moving picture, centred at the
+     * still picture's default size, keeping every frame of the longest part that fits there
+     * ([AnimationParts]). A GIF of one frame is placed as the still picture it is.
+     */
+    fun prepareMovingPicture(uri: String) {
+        val snapshot = mutableState.value.snapshot ?: return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true, readingFrames = true, error = null)
+            try {
+                val panel = snapshot.preview
+                val room = (WATCH_CONTAINER_BYTE_CEILING - snapshot.containerBytes).toLong()
+                fun prepared(sourceWidth: Int, sourceHeight: Int, preview: PreviewFrame): PreparedPicture {
+                    val (width, height) = pictureBaselineSize(sourceWidth, sourceHeight, panel.width, panel.height)
+                    return PreparedPicture(
+                        handle = "moving:${UUID.randomUUID()}",
+                        width = width,
+                        height = height,
+                        opaque = false,
+                        sizes = pictureSizes(width, height, panel.width, panel.height,
+                            kept = width == sourceWidth && height == sourceHeight),
+                        preview = preview,
+                    )
+                }
+                runCatching {
+                    val probe = repository.probeVideo(uri)
+                    val video = probe?.let { video ->
+                        val start = prepared(video.width, video.height, PreviewFrame(1, 1, IntArray(1))).defaultSize
+                            ?: throw WatchFaceException("This picture is too small to add.")
+                        readVideoPart(uri, VideoClip.opening(video.durationMs, video.maxLengthMs), 1,
+                            Fitting(room, start.width, start.height))?.takeIf { it.source.frames.size >= 2 }
+                            ?: throw noRoomForFrames(picture = true)
+                    }
+                    video?.read?.let { it to video } ?: (repository.readAnimation(uri) to null)
+                }
+                    .onSuccess { (read, video) ->
+                        if (read.frames.size < 2) {
+                            if (read.clip == null) preparePicture(uri)
+                            else showFailure(WatchFaceException("Only one frame of this video could be read."))
+                            return@onSuccess
+                        }
+                        val picture = prepared(read.width, read.height, read.frames.first())
+                        val start = picture.defaultSize
+                        if (start == null) {
+                            showFailure(WatchFaceException("This picture is too small to add."))
+                            return@onSuccess
+                        }
+                        val pending = video
+                            ?: (refit(PendingAnimation(read, 1, 1), 1, 0, start.width, start.height, room) as? Refit.Ready)?.pending
+                        if (pending == null) {
+                            showFailure(noRoomForFrames(picture = true))
+                            return@onSuccess
+                        }
+                        mutableState.value.pendingPicture?.let { previous ->
+                            if (previous.animation == null) repository.releasePicture(previous.prepared.handle)
+                        }
+                        mutableState.value = mutableState.value.startingChoice().copy(
+                            pendingPicture = PendingPicture(picture.copy(preview = pending.source.frames.first()),
+                                start.percent / 100f, panel.width / 2f, panel.height / 2f, animation = pending),
+                            isWorking = false,
+                        )
+                    }
+                    .onFailure(::showFailure)
+            } finally {
+                mutableState.value = mutableState.value.copy(readingFrames = false)
+            }
+        }
+    }
+
+    /** Keeps every [step]th frame of the moving picture being placed, fitting its part again. */
+    fun setMovingPictureStep(step: Int) {
+        val animation = mutableState.value.pendingPicture?.animation ?: return
+        if (step !in animation.steps || step == animation.step) return
+        refitPicture(animation, step, animation.part?.startMs ?: 0)
+    }
+
+    /** [pending] as the moving picture fitted again at [step] from [startMs], at its size now. */
+    private fun refitPicture(pending: PendingAnimation, step: Int, startMs: Int, mayRead: Boolean = true) {
+        val state = mutableState.value
+        val snapshot = state.snapshot ?: return
+        val size = state.pendingPicture?.size ?: return
+        place(pending, refit(pending, step, startMs, size.width, size.height, snapshot.roomForPicture(), mayRead))
+    }
+
+    /** The pending background's colour, or null for the picture's own; drawn now, applied on Use. */
+    fun setBackgroundTint(tint: Int?) {
+        val state = mutableState.value
+        mutableState.value = state.copy(placement = state.placement.copy(tint = tint))
+    }
+
+    /** Decodes a picked picture and starts placing it, centred, at its default size. */
+    fun preparePicture(uri: String) {
+        val snapshot = mutableState.value.snapshot ?: return
+        viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true, error = null)
+            runCatching { repository.preparePicture(uri, snapshot.projectId, snapshot.selectedVariant.basename) }
+                .onSuccess { prepared ->
+                    val start = prepared.defaultSize
+                    if (start == null) {
+                        repository.releasePicture(prepared.handle)
+                        showFailure(WatchFaceException("This picture is too small to add."))
+                        return@onSuccess
+                    }
+                    mutableState.value.pendingPicture?.let { previous ->
+                        if (previous.prepared.handle != prepared.handle) repository.releasePicture(previous.prepared.handle)
+                    }
+                    mutableState.value = mutableState.value.startingChoice().copy(
+                        pendingPicture = PendingPicture(prepared, start.percent / 100f,
+                            snapshot.preview.width / 2f, snapshot.preview.height / 2f),
+                        isWorking = false,
+                    )
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    private var textJob: Job? = null
+
+    /** Starts placing [words] as text in the phone's plain font, centred, at the default size. */
+    fun startText(words: String) {
+        val panel = mutableState.value.snapshot?.preview ?: return
+        beginText(TextPicture(words), tint = null, replacing = null) { _, _ -> panel.width / 2f to panel.height / 2f }
+    }
+
+    /**
+     * Starts drawing the selected label in another font: its word at its size and colour, set
+     * where the watch draws it ([dev.fitface.studio.core.model.WidgetLabel.centreFor]). Added,
+     * the text replaces it.
+     */
+    fun startTextFromLabel() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val label = snapshot.widgets.singleOrNull { it.globalIndex == mutableState.value.selectedWidgetIndex } ?: return
+        val word = label.label ?: return
+        // This label's text left open is resumed as it was, not drawn again from the start.
+        if (mutableState.value.pendingPicture?.text?.replacing?.globalIndex == label.globalIndex) return
+        // Drawn white, so white is the text's own colour and anything else is a tint.
+        val tint = label.colorArgb?.let { it or 0xFF000000.toInt() }?.takeIf { it != 0xFFFFFFFF.toInt() }
+        beginText(TextPicture(word.text, sizePx = TextPicture.size(word.sizePx)), tint, label) { width, height ->
+            labelCentre(label, width, height)
+        }
+    }
+
+    /** Where a [width] × [height] text sits for it to cover what [label] draws. */
+    private fun labelCentre(label: WidgetGuide, width: Int, height: Int): Pair<Float, Float> =
+        requireNotNull(label.label).centreFor(width, height, label.drawLeft, label.drawTop, label.width, label.height)
+
+    /** Starts placing [text] once it is drawn, its centre where [place] puts a picture its size. */
+    private fun beginText(text: TextPicture, tint: Int?, replacing: WidgetGuide?, place: (Int, Int) -> Pair<Float, Float>) {
+        val snapshot = mutableState.value.snapshot ?: return
+        textJob?.cancel()
+        textJob = viewModelScope.launch {
+            mutableState.value = mutableState.value.copy(isWorking = true, error = null)
+            runCatching { repository.prepareText(text, snapshot.projectId, snapshot.selectedVariant.basename) }
+                .onSuccess { prepared ->
+                    val picture = prepared.picture
+                    if (picture == null) {
+                        showFailure(WatchFaceException(textProblemSentence(prepared.problem)))
+                        return@onSuccess
+                    }
+                    mutableState.value.pendingPicture?.let { previous ->
+                        if (previous.prepared.handle != picture.handle) repository.releasePicture(previous.prepared.handle)
+                    }
+                    mutableState.value = mutableState.value.startingChoice().copy(isWorking = false)
+                    val (centreX, centreY) = place(picture.width, picture.height)
+                    updatePicture(PendingPicture(picture, 1f, centreX, centreY, tint,
+                        text = PendingText(text, text, replacing = replacing)))
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    fun setTextWords(words: String) = changeText { it.copy(text = words) }
+
+    fun setTextFont(font: TextFont) = changeText { it.copy(font = font) }
+
+    /** The font size, within [TextPicture.MIN_SIZE_PX]..[TextPicture.MAX_SIZE_PX]. */
+    fun setTextSize(sizePx: Int) = setTextSize(sizePx, fromPinch = false)
+
+    private fun setTextSize(sizePx: Int, fromPinch: Boolean) = changeText { wanted ->
+        wanted.copy(sizePx = TextPicture.size(sizePx))
+    }.also {
+        if (!fromPinch) mutableState.value.pendingPicture?.text?.let { text ->
+            updateText(text.copy(pinchSize = text.wanted.sizePx.toFloat()))
+        }
+    }
+
+    /** Loads a picked font file and draws the clock, or else the text, in it. */
+    fun chooseFontFile(uri: String) {
+        viewModelScope.launch {
+            runCatching { repository.readFont(uri) }
+                .onSuccess { font -> if (mutableState.value.pendingClockFont != null) setClockFont(font) else setTextFont(font) }
+                .onFailure(::showFailure)
+        }
+    }
+
+    private var clockFontJob: Job? = null
+
+    /**
+     * Opens the Clock font page on every part the selected style draws as pictures, at the
+     * tray's style scope, with no font chosen: the face is shown as it is until one is.
+     */
+    fun startClockFont() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val parts = snapshot.widgets.mapNotNull { it.clockPart }.distinct().sorted()
+        // Already open, it is resumed as it was: opening it again from the Canvas or Edit widget
+        // after leaving the page must not throw away the font, parts and colour chosen.
+        if (parts.isEmpty() || mutableState.value.pendingClockFont != null) return
+        // A picture or text left unfinished gives way to the clock font asked for now.
+        textJob?.cancel()
+        discardPicture()
+        val state = mutableState.value
+        mutableState.value = state.copy(widgetsChoicesStarted = state.widgetsChoicesStarted + 1, pendingClockFont = PendingClockFont(
+            parts = parts.toSet(),
+            applyToAllStyles = state.applyWidgetEditsToAllStyles,
+            available = parts,
+            current = snapshot.widgets.firstNotNullOfOrNull { it.clockFont },
+        ))
+    }
+
+    fun setClockFont(font: TextFont) = changeClockFont { it.copy(font = font) }
+
+    fun setClockPart(part: ClockPart, included: Boolean) =
+        changeClockFont { it.copy(parts = if (included) it.parts + part else it.parts - part) }
+
+    /** One colour for every part, or null for each part's own. */
+    fun setClockFontTint(tint: Int?) = changeClockFont { it.copy(tint = tint) }
+
+    fun setClockFontAllStyles(all: Boolean) = changeClockFont { it.copy(applyToAllStyles = all) }
+
+    private fun changeClockFont(change: (PendingClockFont) -> PendingClockFont) {
+        val pending = mutableState.value.pendingClockFont ?: return
+        val next = change(pending).copy(problem = null)
+        if (next == pending.copy(problem = null)) return
+        mutableState.value = mutableState.value.copy(pendingClockFont = next)
+        redrawClockFont()
+    }
+
+    /**
+     * Draws the face again as the page now asks; only the newest request lands. One that cannot
+     * be drawn keeps the face as it was and says why on the page. Nothing is drawn before a
+     * font is chosen.
+     */
+    private fun redrawClockFont() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val wanted = mutableState.value.pendingClockFont?.wanted ?: return
+        clockFontJob?.cancel()
+        if (wanted.parts.isEmpty()) {
+            updateClockFont(wanted) { it.copy(problem = "Choose at least one part of the clock to redraw.") }
+            return
+        }
+        clockFontJob = viewModelScope.launch {
+            runCatching { repository.previewClockFont(wanted, snapshot.projectId, snapshot.selectedVariant.basename) }
+                .onSuccess { preview -> updateClockFont(wanted) { it.copy(drawn = wanted, preview = preview, problem = null) } }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    val message = (error as? WatchFaceException)?.userMessage ?: "This font could not be drawn. Choose another."
+                    updateClockFont(wanted) { it.copy(problem = message) }
+                }
+        }
+    }
+
+    private fun updateClockFont(wanted: ClockFontRequest, change: (PendingClockFont) -> PendingClockFont) {
+        val pending = mutableState.value.pendingClockFont?.takeIf { it.wanted == wanted } ?: return
+        mutableState.value = mutableState.value.copy(pendingClockFont = change(pending))
+    }
+
+    fun discardClockFont() {
+        clockFontJob?.cancel()
+        mutableState.value = mutableState.value.copy(pendingClockFont = null)
+    }
+
+    /**
+     * A picture or text starting on the Widgets page: one choice is open there at a time, so a
+     * clock font left unfinished gives way to it, and the start is counted for the screen to go
+     * there ([EditorUiState.widgetsChoicesStarted]). The caller releases a previous picture.
+     */
+    private fun EditorUiState.startingChoice(): EditorUiState {
+        if (pendingClockFont != null) clockFontJob?.cancel()
+        return copy(pendingClockFont = null, widgetsChoicesStarted = widgetsChoicesStarted + 1)
+    }
+
+    fun applyClockFont() {
+        val pending = mutableState.value.pendingClockFont?.takeIf { it.ready } ?: return
+        val ticket = requireNotNull(pending.preview).ticket
+        operate(onSuccess = { it.copy(pendingClockFont = null) }) { repository.applyClockFont(ticket) }
+    }
+
+    /** Draws [part] in the face's own pictures again, in the tray's style scope. */
+    fun resetClockFont(part: ClockPart) {
+        val state = mutableState.value
+        val snapshot = state.snapshot ?: return
+        operate { repository.resetClockFont(snapshot.selectedVariant.basename, part, state.applyWidgetEditsToAllStyles) }
+    }
+
+    private fun changeText(change: (TextPicture) -> TextPicture) {
+        val text = mutableState.value.pendingPicture?.text ?: return
+        val wanted = change(text.wanted)
+        if (wanted == text.wanted) return
+        updateText(text.copy(wanted = wanted, problem = null))
+        redrawText()
+    }
+
+    private fun updateText(text: PendingText) {
+        val pending = mutableState.value.pendingPicture ?: return
+        mutableState.value = mutableState.value.copy(pendingPicture = pending.copy(text = text))
+    }
+
+    /**
+     * Draws the text again as the card now asks, replacing the face's picture when it is
+     * drawn; only the newest request lands. A text that cannot be drawn keeps the face as it
+     * was and says why on the card; a font that cannot be read goes back to the one drawn.
+     */
+    private fun redrawText() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val wanted = mutableState.value.pendingPicture?.text?.wanted ?: return
+        textJob?.cancel()
+        textJob = viewModelScope.launch {
+            runCatching { repository.prepareText(wanted, snapshot.projectId, snapshot.selectedVariant.basename) }
+                .onSuccess { prepared ->
+                    val pending = mutableState.value.pendingPicture ?: return@onSuccess
+                    val text = pending.text?.takeIf { it.wanted == wanted } ?: return@onSuccess
+                    val picture = prepared.picture
+                    if (picture == null) {
+                        updateText(text.copy(problem = prepared.problem))
+                    } else {
+                        updatePicture(pending.copy(prepared = picture, zoom = 1f, text = text.copy(drawn = wanted, problem = null)))
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    mutableState.value.pendingPicture?.text?.let { text ->
+                        if (text.wanted == wanted) updateText(text.copy(wanted = text.drawn, problem = null))
+                    }
+                    showFailure(error)
+                }
+        }
+    }
+
+    private fun textProblemSentence(problem: TextProblem?): String = when (problem) {
+        TextProblem.TOO_BIG -> "This text is too big for the face. Make it smaller or shorter."
+        TextProblem.TOO_LONG -> "This text is too long. Use up to ${TextPicture.MAX_LENGTH} characters."
+        TextProblem.TOO_MANY_LINES -> "This text has too many lines. Use up to ${TextPicture.MAX_LINES}."
+        TextProblem.EMPTY, null -> "There is nothing to draw. Type some text."
+    }
+
+    /** A pinch or drag on the face, in the canvas's units: the same gesture that places a background. */
+    fun transformPicture(zoomChange: Float, panX: Float, panY: Float) {
+        val pending = mutableState.value.pendingPicture ?: return
+        val snapshot = mutableState.value.snapshot ?: return
+        val panel = snapshot.preview
+        pending.text?.let { text ->
+            val pinched = (text.pinchSize * zoomChange)
+                .coerceIn(TextPicture.MIN_SIZE_PX.toFloat(), TextPicture.MAX_SIZE_PX.toFloat())
+            updatePicture(pending.copy(
+                centreX = pending.centreX + panX * panel.width,
+                centreY = pending.centreY + panY * panel.height,
+                text = text.copy(pinchSize = pinched),
+            ))
+            if (pinched.roundToInt() != text.wanted.sizePx) setTextSize(pinched.roundToInt(), fromPinch = true)
+            return
+        }
+        val ladder = pending.prepared.ladder
+        updatePicture(pending.copy(
+            zoom = (pending.zoom * zoomChange).coerceIn(ladder.first().percentOfOriginal / 100f,
+                pending.largestFittingPercent(snapshot.roomForPicture()) / 100f),
+            centreX = pending.centreX + panX * panel.width,
+            centreY = pending.centreY + panY * panel.height,
+        ))
+    }
+
+    /** One rung of the picture's ladder smaller or larger, as Smaller and Larger step once it is added. */
+    fun stepPictureSize(grow: Boolean) {
+        val pending = mutableState.value.pendingPicture ?: return
+        val snapshot = mutableState.value.snapshot ?: return
+        pending.text?.let { text ->
+            setTextSize(text.wanted.sizePx + if (grow) 1 else -1)
+            return
+        }
+        val current = pending.size.percentOfOriginal
+        val next = pending.prepared.ladder.map { it.percentOfOriginal }
+            .let { rungs -> if (grow) rungs.firstOrNull { it > current } else rungs.lastOrNull { it < current } } ?: return
+        // Larger stops where the face is full, as it does for a widget.
+        if (grow && next > pending.largestFittingPercent(snapshot.roomForPicture())) return
+        updatePicture(pending.copy(zoom = next / 100f))
+    }
+
+    fun resetPicturePlacement() {
+        val pending = mutableState.value.pendingPicture ?: return
+        val snapshot = mutableState.value.snapshot ?: return
+        val panel = snapshot.preview
+        pending.text?.let { text ->
+            val (x, y) = text.replacing?.let { labelCentre(it, pending.prepared.width, pending.prepared.height) }
+                ?: (panel.width / 2f to panel.height / 2f)
+            updatePicture(pending.copy(centreX = x, centreY = y))
+            setTextSize(text.replacing?.label?.sizePx ?: TextPicture.DEFAULT_SIZE_PX)
+            return
+        }
+        val start = pending.prepared.defaultSize ?: return
+        val percent = minOf(start.percent, pending.largestFittingPercent(snapshot.roomForPicture()))
+        updatePicture(pending.copy(zoom = percent / 100f, centreX = panel.width / 2f, centreY = panel.height / 2f))
+    }
+
+    fun setPictureTint(tint: Int?) {
+        val pending = mutableState.value.pendingPicture ?: return
+        mutableState.value = mutableState.value.copy(pendingPicture = pending.copy(tint = tint))
+    }
+
+    fun discardPicture() {
+        val pending = mutableState.value.pendingPicture ?: return
+        textJob?.cancel()
+        mutableState.value = mutableState.value.copy(pendingPicture = null)
+        viewModelScope.launch { repository.releasePicture(pending.prepared.handle) }
+    }
+
+    /**
+     * Adds the pending picture where it was placed. Like any widget it can be pushed partly
+     * off the face, but no further than [offFaceKeepVisible] leaves on it, the drag's rule.
+     */
+    fun addPicture() {
+        val pending = mutableState.value.pendingPicture ?: return
+        val snapshot = mutableState.value.snapshot ?: return
+        if (pending.text?.ready == false) return
+        // The label a text replaces goes after the text is in, so a refusal leaves both rather than neither.
+        var labelKept: WatchFaceException? = null
+        operate(onSuccess = { state ->
+            state.copy(
+                pendingPicture = null,
+                selectedWidgetIndex = state.snapshot?.widgets?.lastOrNull()?.globalIndex,
+                multiSelection = emptyList(),
+                applyWidgetEditsToAllStyles = false,
+                pictureAdded = PictureAdded(messageIds.incrementAndGet()),
+                error = labelKept?.let {
+                    UserMessage(messageIds.incrementAndGet(), "The text was added, but the label is still there: ${it.userMessage}")
+                },
+            )
+        }) {
+            val animation = pending.animation
+            val replacing = pending.text?.replacing
+            if (replacing != null) {
+                val group = EditGroups.next()
+                val added = repository.addPicture(pending.prepared.handle, snapshot.projectId, snapshot.selectedVariant.basename,
+                    100, pending.left, pending.top, pending.tint, group)
+                // Found again by identity: the label could have been moved on Canvas while this was placed.
+                val label = added.widgets.firstOrNull {
+                    it.globalIndex == replacing.globalIndex && it.type == replacing.type &&
+                        it.sequenceId == replacing.sequenceId && it.label != null
+                } ?: return@operate added
+                try {
+                    repository.removeWidget(added.selectedVariant.basename, label.globalIndex, label.type, label.sequenceId,
+                        label.x, label.y, requireFinal = false, applyToAllStyles = false, group = group)
+                } catch (error: WatchFaceException) {
+                    labelKept = error
+                    added
+                }
+            } else if (animation != null) {
+                repository.addMovingPicture(animation.source, animation.step, pending.size.width, pending.size.height,
+                    pending.left, pending.top, pending.tint)
+            } else {
+                repository.addPicture(pending.prepared.handle, snapshot.projectId, snapshot.selectedVariant.basename,
+                    pending.size.percentOfOriginal, pending.left, pending.top, pending.tint)
+            }
+        }
+    }
+
+    fun clearPictureAdded(id: Long) {
+        if (mutableState.value.pictureAdded?.id == id) mutableState.value = mutableState.value.copy(pictureAdded = null)
+    }
+
+    /** Keeps the picture's rectangle on the face by at least what a drag would leave there. */
+    private fun updatePicture(next: PendingPicture) {
+        val panel = mutableState.value.snapshot?.preview ?: return
+        val size = next.size
+        fun keep(centre: Float, extent: Int, panelExtent: Int): Float {
+            val visible = offFaceKeepVisible(extent)
+            return centre.coerceIn(visible - extent / 2f, panelExtent - visible + extent / 2f)
+        }
+        val before = mutableState.value.pendingPicture?.size
+        mutableState.value = mutableState.value.copy(pendingPicture = next.copy(
+            centreX = keep(next.centreX, size.width, panel.width),
+            centreY = keep(next.centreY, size.height, panel.height),
+        ))
+        // A moving picture's frames cost its size: a new size fits its part again, as Fewer
+        // and More do, cut from what is read so a pinch stays smooth.
+        val animation = next.animation
+        if (animation != null && before != null && (before.width != size.width || before.height != size.height)) {
+            refitPicture(animation, animation.step, animation.part?.startMs ?: 0, mayRead = false)
+        }
+    }
+
+    /**
+     * Commits the pending image as the face's background.
+     *
+     * Which path it takes is decided by the container, not by a mode the user has to
+     * pick: a face with a panel raster somewhere takes the same-size replacement, and one
+     * with none has a background added, which is the only thing that can work there.
+     */
+    fun applyBackground() {
+        val pending = mutableState.value.pendingImage ?: return
+        val placement = mutableState.value.placement
+        val snapshot = mutableState.value.snapshot ?: return
+        mutableState.value.pendingAnimation?.let { animation ->
+            operate(onSuccess = { it.copy(pendingImage = null, pendingAnimation = null, previewReviewed = false) }) {
+                repository.addMovingBackground(animation.source, placement, animation.step)
+            }
+            return
+        }
+        val thisStyleOnly = mutableState.value.backgroundThisStyleOnly && snapshot.offersBackgroundScope
+        val adding = snapshot.backgroundAdds(thisStyleOnly)
+        operate(
+            onSuccess = { current ->
+                current.copy(pendingImage = null, previewReviewed = false)
+            },
+        ) {
+            if (adding) {
+                repository.addBackground(pending.uri, placement, thisStyleOnly)
+            } else {
+                repository.replaceBackground(pending.uri, placement, thisStyleOnly)
+            }
+        }
+    }
+
+    /**
+     * Commits a dragged widget's new position, through the same worker a nudge uses.
+     *
+     * This used to set `isWorking` for the length of the commit, which turned the canvas
+     * off — so a drag started inside that window found `enabled` false, bailed out of
+     * `onDragStart` and was dropped silently, with no feedback at all. A commit is a
+     * reparse plus a revalidate plus a preview recompose, so that window is not small,
+     * and it is half of the reported "sometimes they stick". Queueing the target instead
+     * leaves the canvas live: the optimistic preview shows the release position at once
+     * and the worker commits it.
+     */
+    fun moveWidget(globalIndex: Int, x: Int, y: Int) {
+        val snapshot = mutableState.value.snapshot ?: return
+        val selected = snapshot.widgets.singleOrNull { it.globalIndex == globalIndex } ?: return
+        val base = pendingTarget(snapshot.selectedVariant.basename, globalIndex)
+            ?: PendingWidgetTarget(selected.x, selected.y, selected.type, selected.sequenceId)
+        if (base.x == x && base.y == y) return
+        queueWidgetMove(snapshot, selected, x, y, group = EditGroups.next())
+    }
+
+    /**
+     * Moves a widget by one pixel, coalescing repeats so press-and-hold works.
+     *
+     * A held nudge fires far faster than a container commit completes. Reading the
+     * next position from the on-screen snapshot would therefore compute the same
+     * target every time (the snapshot has not advanced yet) and the widget would not
+     * move at all. So the target is accumulated here, the preview updates instantly,
+     * and one worker commits whatever the latest target is — dropping the
+     * intermediate positions instead of queueing a commit per tick.
+     */
+    fun nudgeWidget(globalIndex: Int, deltaX: Int, deltaY: Int, group: Long? = null) {
+        val snapshot = mutableState.value.snapshot ?: return
+        val widget = snapshot.widgets.firstOrNull { it.globalIndex == globalIndex } ?: return
+        if (!widget.canEditPosition) return
+        val base = pendingTarget(snapshot.selectedVariant.basename, globalIndex)
+            ?: PendingWidgetTarget(widget.x, widget.y, widget.type, widget.sequenceId)
+        val next = clampToPanel(snapshot, widget, base.x + deltaX, base.y + deltaY)
+        if (next.x !in Short.MIN_VALUE..Short.MAX_VALUE ||
+            next.y !in Short.MIN_VALUE..Short.MAX_VALUE
+        ) {
+            return
+        }
+        // The clamp refused the step, so the widget is already as far over as it goes.
+        if (next == base) return
+        queueWidgetMove(snapshot, widget, next.x, next.y, group = group ?: nudgeGroup)
+    }
+
+    /**
+     * Moves a widget so its drawn rectangle's left and top edges land on [left] and [top],
+     * the numbers Edit widget shows; null leaves that axis where it is. Typed positions and
+     * the Centre buttons come here.
+     *
+     * Measured from the queued target, not the snapshot, so a number typed while a nudge is
+     * still committing lands where it says. It is then a nudge by the difference, with the
+     * same clamp, range check and commit queue.
+     */
+    fun placeWidget(globalIndex: Int, left: Int, top: Int) {
+        val snapshot = mutableState.value.snapshot ?: return
+        val widget = snapshot.widgets.firstOrNull { it.globalIndex == globalIndex } ?: return
+        val base = pendingTarget(snapshot.selectedVariant.basename, globalIndex)
+            ?: PendingWidgetTarget(widget.x, widget.y, widget.type, widget.sequenceId)
+        val deltaX = left - (widget.drawLeft + base.x - widget.x)
+        val deltaY = top - (widget.drawTop + base.y - widget.y)
+        if (deltaX != 0 || deltaY != 0) nudgeWidget(globalIndex, deltaX, deltaY, EditGroups.next())
+    }
+
+    /** A press of a nudge arrow began: everything it commits, held or not, is one undo step. */
+    fun beginNudge() {
+        nudgeGroup = EditGroups.next()
+    }
+
+    fun undo() = stepHistory(back = true)
+
+    fun redo() = stepHistory(back = false)
+
+    /**
+     * One step back or forward through the session's history.
+     *
+     * Queued moves are dropped and the move being committed is waited for first. Without the
+     * wait, a nudge already handed to the repository would land after the undo and put back
+     * what was just taken away. The selection survives only where the same widget is still
+     * at its index: an undone duplicate or removal renumbers the table.
+     */
+    private fun stepHistory(back: Boolean) {
+        val start = mutableState.value
+        val snapshot = start.snapshot ?: return
+        val kind = (if (back) snapshot.undoKind else snapshot.redoKind) ?: return
+        if (start.isWorking) return
+        val identities = snapshot.widgets.associate { it.globalIndex to (it.type to it.sequenceId) }
+        operate(onSuccess = { next ->
+            val widgets = next.snapshot?.widgets.orEmpty().associateBy { it.globalIndex }
+            fun same(index: Int) = widgets[index]?.let { identities[index] == (it.type to it.sequenceId) } == true
+            // Named from the result, not the request: a move that was still committing when
+            // Undo was tapped is what the undo took back.
+            val done = (if (back) next.snapshot?.redoKind else next.snapshot?.undoKind) ?: kind
+            next.copy(
+                selectedWidgetIndex = next.selectedWidgetIndex?.takeIf(::same),
+                multiSelection = next.multiSelection.filter(::same),
+                historyNotice = HistoryNotice(messageIds.incrementAndGet(), undone = back, kind = done),
+            )
+        }) {
+            moveWorker?.join()
+            if (back) repository.undo() else repository.redo()
+        }
+    }
+
+    fun clearHistoryNotice(id: Long) {
+        val current = mutableState.value
+        if (current.historyNotice?.id == id) mutableState.value = current.copy(historyNotice = null)
+    }
+
+    /**
+     * Keeps a nudged widget on the panel: at least [offFaceKeepVisible] of it, so it can hang
+     * partly past an edge (issue #14) yet always be tapped again.
+     *
+     * A nudge works in *stored* coordinates, and a stored coordinate is legitimately
+     * negative — it is an offset from whatever the widget is positioned against, and a
+     * widget aligned to the right edge of something is stored as `x < 0`. Clamping the
+     * stored value to `>= 0` would therefore fling those widgets across the face. So the
+     * clamp is applied in display space — by the same [constrainDragCoordinate] the drag
+     * uses, offset by `drawOffset` so it is the drawn rectangle that is held, and widened
+     * to admit where the widget already is so one that starts outside can still walk back
+     * in — and the result is converted back through the widget's own origin.
+     *
+     * Without this the nudge had no bound but the Short range, so a held press walked a
+     * widget clean off the canvas, after which it could not be tapped at all and only the
+     * Widgets list could reach it.
+     */
+    private fun clampToPanel(
+        snapshot: EditorSnapshot,
+        widget: WidgetGuide,
+        x: Int,
+        y: Int,
+    ): PendingWidgetTarget {
+        return PendingWidgetTarget(
+            x = displayToStored(
+                display = constrainDragCoordinate(
+                    proposed = storedToDisplay(x, widget.originX).toFloat(),
+                    starting = storedToDisplay(widget.x, widget.originX).toFloat(),
+                    extent = widget.visualBounds.width,
+                    canvasExtent = snapshot.preview.width,
+                    drawOffset = widget.visualOffsetX,
+                    keepVisible = offFaceKeepVisible(widget.visualBounds.width),
+                ).roundToInt(),
+                origin = widget.originX,
+            ),
+            y = displayToStored(
+                display = constrainDragCoordinate(
+                    proposed = storedToDisplay(y, widget.originY).toFloat(),
+                    starting = storedToDisplay(widget.y, widget.originY).toFloat(),
+                    extent = widget.visualBounds.height,
+                    canvasExtent = snapshot.preview.height,
+                    drawOffset = widget.visualOffsetY,
+                    keepVisible = offFaceKeepVisible(widget.visualBounds.height),
+                ).roundToInt(),
+                origin = widget.originY,
+            ),
+            widgetType = widget.type,
+            sequenceId = widget.sequenceId,
+        )
+    }
+
+    private fun queueWidgetMove(
+        snapshot: EditorSnapshot,
+        widget: WidgetGuide,
+        x: Int,
+        y: Int,
+        /** False for a set's members, whose preview is [EditorUiState.pendingSetMove]. */
+        previewAlone: Boolean = true,
+        group: Long? = null,
+    ) {
+        // The variant is captured now, from the canvas this drag/nudge is actually on —
+        // never re-read at commit time, when the user may have switched to a different
+        // one entirely. See `PendingWidgetTarget`.
+        val key = PendingMoveKey(snapshot.selectedVariant.basename, widget.globalIndex)
+        // Queueing the target and deciding whether a worker is needed happen together, or
+        // a target queued in the instant a worker is finishing would sit there with nobody
+        // left to commit it.
+        val startMoveWorker = synchronized(pendingMoves) {
+            pendingMoves[key] = PendingWidgetTarget(x, y, widget.type, widget.sequenceId).also { it.group = group }
+            val alreadyDraining = moveWorkerDraining
+            moveWorkerDraining = true
+            !alreadyDraining
+        }
+        mutableState.value = mutableState.value.copy(
+            previewReviewed = false,
+            error = null,
+            pendingWidgetMove = if (previewAlone) {
+                WidgetMovePreview(
+                    globalIndex = widget.globalIndex,
+                    displayX = storedToDisplay(x, widget.originX).toFloat(),
+                    displayY = storedToDisplay(y, widget.originY).toFloat(),
+                )
+            } else {
+                mutableState.value.pendingWidgetMove
+            },
+        )
+        if (startMoveWorker) {
+            moveWorker = viewModelScope.launch { drainWidgetMoves() }
+        }
+    }
+
+    /**
+     * Commits the queued targets, newest per widget, until there are none left.
+     *
+     * A target is taken out of the map *before* its commit, so a newer one arriving while
+     * that commit is in flight is a fresh entry the next turn of the loop picks up — and a
+     * commit that leaves the widget where it was cannot be retried forever.
+     */
+    private suspend fun drainWidgetMoves() {
+        while (true) {
+            val (key, target) = takePendingMove() ?: break
+            val liveSnapshot = mutableState.value.snapshot
+            if (liveSnapshot == null) {
+                clearPendingMoves()
+                break
+            }
+            // The snapshot can only answer for the variant it is *of*: this target may
+            // have been queued against a style the canvas has since switched away from,
+            // and a global index means something different in every entry, so comparing
+            // against the wrong one would skip a real move or commit a stale one. Where
+            // it can answer, the two questions it settles are whether the widget is still
+            // there and whether the container has already caught up with the target.
+            // Where it cannot, the commit goes ahead: `moveWidget` resolves its target by
+            // variant and global index, never by what is on screen.
+            if (liveSnapshot.selectedVariant.basename == key.variantBasename) {
+                val widget = liveSnapshot.widgets
+                    .firstOrNull { it.globalIndex == key.globalIndex }
+                    ?: continue
+                if (widget.x == target.x && widget.y == target.y) continue
+            }
+            val updated = runCatching {
+                repository.moveWidget(
+                    styleName = key.variantBasename,
+                    globalIndex = key.globalIndex,
+                    widgetType = target.widgetType,
+                    sequenceId = target.sequenceId,
+                    x = target.x,
+                    y = target.y,
+                    applyToAllStyles = mutableState.value.applyWidgetEditsToAllStyles,
+                    group = target.group,
+                )
+            }.getOrElse { error ->
+                // Every target still queued was accumulated on top of the position the
+                // container has just refused, so none of them survive it.
+                clearPendingMoves()
+                showFailure(error)
+                null
+            }
+            // Round again either way: an emptied map is how this worker stops.
+            if (updated == null) continue
+            directInstaller.payloadChanged()
+            mutableState.value = mutableState.value.copy(snapshot = updated, error = null)
+        }
+        // Nothing is outstanding, so the snapshot has overtaken the optimistic preview.
+        if (mutableState.value.pendingWidgetMove != null) {
+            mutableState.value = mutableState.value.copy(pendingWidgetMove = null)
+        }
+        if (mutableState.value.pendingSetMove.isNotEmpty()) {
+            mutableState.value = mutableState.value.copy(pendingSetMove = emptyList())
+        }
+    }
+
+    private fun pendingTarget(variantBasename: String, globalIndex: Int): PendingWidgetTarget? =
+        synchronized(pendingMoves) {
+            val key = PendingMoveKey(variantBasename, globalIndex)
+            pendingMoves[key] ?: inFlightMove?.takeIf { it.first == key }?.second
+        }
+
+    /** The next target to commit, or null — which also retires the worker asking. */
+    private fun takePendingMove(): Pair<PendingMoveKey, PendingWidgetTarget>? {
+        synchronized(pendingMoves) {
+            // The previous commit has published its snapshot (or failed) before
+            // the worker asks for another target.
+            inFlightMove = null
+            // Every exit that returns null must retire the worker. Leaving
+            // `moveWorkerDraining` true on the way out would convince `queueWidgetMove`
+            // that a drain is still running, and no later move would ever start one.
+            val entry = pendingMoves.entries.firstOrNull()
+            if (entry == null) {
+                moveWorkerDraining = false
+                return null
+            }
+            val key = entry.key
+            val target = entry.value
+            pendingMoves.remove(key)
+            return (key to target).also { inFlightMove = it }
+        }
+    }
+
+    private fun clearPendingMoves() {
+        synchronized(pendingMoves) {
+            pendingMoves.clear()
+            inFlightMove = null
+        }
+    }
+
+    /**
+     * Steps the selected widget one rung along its resize ladder — see [widgetResizeLadder]
+     * for why the sizes come from a ladder rather than from scaling what is on screen.
+     */
+    /**
+     * One rung of the selected widget's resize ladder. A step that arrives while an edit is
+     * saving is dropped rather than run against the snapshot it would replace: a held − or +
+     * keeps stepping, each step from the size the last one left.
+     */
+    fun resizeSelectedWidget(grow: Boolean) {
+        if (mutableState.value.isWorking) return
+        val snapshot = mutableState.value.snapshot ?: return
+        val selected = snapshot.widgets.singleOrNull {
+            it.globalIndex == mutableState.value.selectedWidgetIndex
+        } ?: return
+        if (!selected.canResize) return
+        val next = nextWidgetSize(selected, grow) ?: return
+        if (next.width == selected.width && next.height == selected.height) return
+        operate {
+            repository.resizeWidget(
+                styleName = snapshot.selectedVariant.basename,
+                globalIndex = selected.globalIndex,
+                widgetType = selected.type,
+                sequenceId = selected.sequenceId,
+                x = selected.x,
+                y = selected.y,
+                width = next.width,
+                height = next.height,
+                applyToAllStyles = mutableState.value.applyWidgetEditsToAllStyles,
+            )
+        }
+    }
+
+    fun arrangeSelectedWidget(action: dev.fitface.studio.core.model.WidgetArrangement) {
+        val current = mutableState.value
+        if (current.isWorking || current.multiSelection.isNotEmpty()) return
+        val snapshot = current.snapshot ?: return
+        val widget = snapshot.widgets.singleOrNull { it.globalIndex == current.selectedWidgetIndex } ?: return
+        val destination = dev.fitface.studio.core.model.arrangementTarget(snapshot.widgets, widget.globalIndex, action) ?: return
+        operate(onSuccess = { it.copy(selectedWidgetIndex = destination, multiSelection = emptyList()) }) {
+            repository.reorderWidget(snapshot.selectedVariant.basename, widget.globalIndex, widget.type,
+                widget.sequenceId, widget.x, widget.y, destination)
+        }
+    }
+
+    fun rotateSelectedWidget(angleTenths: Int) {
+        val current = mutableState.value
+        if (current.isWorking) return
+        val snapshot = current.snapshot ?: return
+        val widget = snapshot.widgets.singleOrNull { it.globalIndex == current.selectedWidgetIndex } ?: return
+        val angle = dev.fitface.studio.core.model.normalizedRotation(angleTenths)
+        if (widget.rotationTenths == angle || !dev.fitface.studio.core.model.canRotateTo(widget, angle)) return
+        operate {
+            repository.rotateWidget(snapshot.selectedVariant.basename, widget.globalIndex,
+                widget.sequenceId, widget.x, widget.y, angle, current.applyWidgetEditsToAllStyles)
+        }
+    }
+
+    /**
+     * Sets the selected widget's colour, or — given null — returns it to the colour each
+     * style in scope shipped with.
+     */
+    /**
+     * Recolours the selected widget, or returns it to its original colours with null.
+     *
+     * A [group] comes from the Canvas's Colour page: its drags save on release, a run of them
+     * is one undo step, and one released while an edit saves is queued rather than dropped.
+     * Edit widget passes none and keeps the old rule: a tap while saving does nothing.
+     */
+    fun setSelectedWidgetColor(colorArgb: Int?, group: Long? = null) {
+        val current = mutableState.value
+        if (current.isWorking) {
+            if (group != null) {
+                current.selectedWidgetIndex?.let { queuedColour = QueuedColour(it, colorArgb, group) }
+            }
+            return
+        }
+        queuedColour = null
+        val snapshot = current.snapshot ?: return
+        val selected = snapshot.widgets.singleOrNull {
+            it.globalIndex == current.selectedWidgetIndex
+        } ?: return
+        if (selected.colorArgb == null || selected.colorArgb == colorArgb) return
+        if (colorArgb != null && colorArgb ushr 24 != 0xFF) return
+        val style = snapshot.selectedVariant.basename
+        val allStyles = current.applyWidgetEditsToAllStyles
+        operate(then = ::saveQueuedColour) {
+            if (colorArgb == null) {
+                repository.resetWidgetColor(style, selected.globalIndex, selected.type,
+                    selected.sequenceId, selected.x, selected.y, allStyles, group)
+            } else {
+                repository.recolorWidget(style, selected.globalIndex, selected.type,
+                    selected.sequenceId, selected.x, selected.y, colorArgb, allStyles, group)
+            }
+        }
+    }
+
+    /** Saves the colour queued during the last save, if the same widget is still selected. */
+    private fun saveQueuedColour() {
+        val queued = queuedColour ?: return
+        queuedColour = null
+        if (mutableState.value.selectedWidgetIndex == queued.globalIndex) {
+            setSelectedWidgetColor(queued.colorArgb, queued.group)
+        }
+    }
+
+    fun removeSelectedWidget() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val selected = snapshot.widgets.singleOrNull {
+            it.globalIndex == mutableState.value.selectedWidgetIndex
+        } ?: return
+        operate(
+            onSuccess = { current ->
+                current.copy(
+                    selectedWidgetIndex = null,
+                    widgetRemovals = current.widgetRemovals + 1,
+                )
+            },
+        ) {
+            repository.removeWidget(
+                snapshot.selectedVariant.basename,
+                selected.globalIndex,
+                selected.type,
+                selected.sequenceId,
+                selected.x,
+                selected.y,
+                requireFinal = false,
+                applyToAllStyles = mutableState.value.applyWidgetEditsToAllStyles,
+            )
+        }
+    }
+
+    fun duplicateSelectedWidget() {
+        val snapshot = mutableState.value.snapshot ?: return
+        val selected = snapshot.widgets.singleOrNull {
+            it.globalIndex == mutableState.value.selectedWidgetIndex
+        } ?: return
+        operate(
+            onSuccess = { current ->
+                current.copy(
+                    selectedWidgetIndex = current.snapshot?.widgets
+                        ?.maxByOrNull { it.ordinal }
+                        ?.globalIndex,
+                )
+            },
+        ) {
+            repository.duplicateWidget(
+                snapshot.selectedVariant.basename,
+                selected.globalIndex,
+                selected.type,
+                selected.sequenceId,
+                selected.x,
+                selected.y,
+                applyToAllStyles = mutableState.value.applyWidgetEditsToAllStyles,
+            )
+        }
+    }
+
+    /**
+     * Re-renders the watch's face-picker thumbnail from the current edit.
+     *
+     * Deliberately one-shot: it does nothing unless there is an edit to capture and
+     * the thumbnail is not already showing it. Re-rendering a thumbnail that is
+     * already current is pure loss — the widget pixels available to the composer come
+     * from the vendor's smaller `preview.bin` render, so every pass that resamples
+     * them softens the result a little further.
+     */
+    fun refreshThumbnail() {
+        val snapshot = mutableState.value.snapshot ?: return
+        if (!snapshot.canRefreshThumbnail) return
+        operate { repository.refreshThumbnail() }
+    }
+
+    fun reset() = operate(
+        onSuccess = {
+            it.copy(selectedWidgetIndex = null, multiSelection = emptyList(), pendingImage = null, pendingAnimation = null)
+        },
+    ) { repository.resetEdits() }
+
+    fun refreshDirectInstallEnvironment() {
+        viewModelScope.launch(Dispatchers.Default) {
+            directInstaller.refreshEnvironment()
+        }
+    }
+
+    fun initializeDirectInstall() {
+        viewModelScope.launch(Dispatchers.Default) {
+            directInstaller.initializeAndDiscover()
+        }
+    }
+
+    fun installCurrentBin() {
+        if (mutableState.value.directInstall.isActive) return
+        viewModelScope.launch {
+            runCatching { repository.prepareDirectInstall() }
+                .onSuccess { payload ->
+                    viewModelScope.launch(Dispatchers.Default) {
+                        directInstaller.install(payload)
+                    }
+                }
+                .onFailure(::showFailure)
+        }
+    }
+
+    fun openCompanionApp() {
+        if (!directInstaller.openCompanionApp()) {
+            showFailure(
+                IllegalStateException("The watch companion app is not installed on this phone"),
+            )
+        }
+    }
+
+    fun openPluginSettings() {
+        if (!directInstaller.openPluginSettings()) {
+            showFailure(IllegalStateException("The watch plugin's settings are unavailable"))
+        }
+    }
+
+    fun confirmPluginChannelReleased() {
+        directInstaller.confirmPluginChannelReleased()
+    }
+
+    /**
+     * Back to the discovery step without tearing the whole setup down — the way out
+     * of a transfer that failed after the plugin had already released the channel.
+     */
+    fun restartDirectInstallDiscovery() {
+        viewModelScope.launch(Dispatchers.Default) {
+            directInstaller.restartDiscovery()
+        }
+    }
+
+    fun resetDirectInstall() {
+        directInstaller.reset()
+    }
+
+    fun clearError(id: Long) {
+        if (mutableState.value.error?.id == id) {
+            mutableState.value = mutableState.value.copy(error = null)
+        }
+    }
+
+    private fun operate(
+        onSuccess: (EditorUiState) -> EditorUiState = { it },
+        /** Runs once the edit has landed or failed and the editor is idle again. */
+        then: () -> Unit = {},
+        block: suspend () -> EditorSnapshot,
+    ) {
+        viewModelScope.launch {
+            // A structural edit renumbers global indices, and a queued move target names
+            // one — so it is dropped with the preview it was drawing rather than left to
+            // land on whichever widget inherits that index.
+            clearPendingMoves()
+            mutableState.value = mutableState.value.copy(
+                isWorking = true,
+                pendingWidgetMove = null,
+                pendingSetMove = emptyList(),
+                previewReviewed = false,
+                capacity = null,
+                error = null,
+            )
+            runCatching { block() }
+                .onSuccess { snapshot ->
+                    // The bytes just changed, so a finished or failed transfer no
+                    // longer describes what would be sent. Re-arm it without asking
+                    // for the four-step setup again — the peers are still cached.
+                    directInstaller.payloadChanged()
+                    val selectedStillExists = mutableState.value.selectedWidgetIndex?.let { index ->
+                        snapshot.widgets.any { it.globalIndex == index }
+                    } ?: true
+                    val stillSelected = mutableState.value.multiSelection.filter { index ->
+                        snapshot.widgets.any { it.globalIndex == index }
+                    }
+                    mutableState.value = onSuccess(
+                        mutableState.value.copy(
+                            snapshot = snapshot,
+                            multiSelection = stillSelected,
+                            selectedWidgetIndex = mutableState.value.selectedWidgetIndex
+                                .takeIf { selectedStillExists },
+                            isWorking = false,
+                            pendingWidgetMove = null,
+                            pendingSetMove = emptyList(),
+                            error = null,
+                        ),
+                    )
+                }
+                .onFailure(::showFailure)
+            then()
+        }
+    }
+
+    private fun showFailure(error: Throwable) {
+        if (error is CancellationException) throw error
+        // technicalDetail carries the machine-readable half — which widget, which style,
+        // which byte count refused the edit — and it stopped here before this, so the
+        // report only ever had the sentence the user had already read.
+        diagnostics.warn(
+            TAG,
+            "Editor operation failed",
+            (error as? WatchFaceException)?.technicalDetail,
+            error,
+        )
+        val text = when (error) {
+            is WatchFaceException -> error.userMessage
+            is SecurityException ->
+                "MaoneArt Watch no longer has permission to access that file. Choose it again."
+            is OutOfMemoryError ->
+                "The selected image is too large to process safely. Try a smaller image."
+            else -> error.message?.takeIf(String::isNotBlank)
+                ?: "The operation could not be applied"
+        }
+        mutableState.value = mutableState.value.copy(
+            isWorking = false,
+            pendingWidgetMove = null,
+            pendingSetMove = emptyList(),
+            capacity = error.containerCapacity(),
+            error = UserMessage(messageIds.incrementAndGet(), text),
+        )
+    }
+
+    fun showDiagnostics() {
+        viewModelScope.launch {
+            val install = mutableState.value.directInstall
+            val sections = listOfNotNull(
+                repository.diagnosticsSection(),
+                DiagnosticsSection(
+                    title = "install",
+                    lines = listOfNotNull(
+                        "phase=${install.phase} previewReviewed=${mutableState.value.previewReviewed}",
+                        // Booleans and counts only. The peer handles and bonded-device
+                        // addresses this state machine works with are never collected.
+                        // The companion app ships under several package names and the
+                        // agent count is found by capability, so record both: "no
+                        // companion" alone once sent a reader chasing an app they had.
+                        "companion=${install.environment.companionAppInstalled} " +
+                            "plugin=${install.environment.pluginInstalled}" +
+                            (install.environment.pluginVersionName?.let { "@$it" } ?: "") + " " +
+                            "framework=${install.environment.frameworkVerdict}" +
+                            (install.environment.frameworkVersionName?.let { "@$it" } ?: "") + " " +
+                            "agents=${install.environment.accessoryAgentCount}",
+                        "peers=${install.peersCached} " +
+                            "bytes=${install.acknowledgedBytes}/${install.totalBytes} " +
+                            "windows=${install.acknowledgedWindows}/${install.totalWindows}",
+                        install.failure?.let { "failure=$it" },
+                        install.watchReplies.takeIf { it.isNotEmpty() }
+                            ?.let { "replies=${it.joinToString("; ")}" },
+                        install.discoveryAnswers.takeIf { it.isNotEmpty() }
+                            ?.let { "discovery=${it.joinToString("; ")}" },
+                    ),
+                ),
+            )
+            mutableState.value = mutableState.value.copy(diagnosticsReport = reporter.render(sections))
+        }
+    }
+
+    fun dismissDiagnostics() {
+        mutableState.value = mutableState.value.copy(diagnosticsReport = null)
+    }
+
+    override fun onCleared() {
+        directInstaller.reset()
+        repository.releaseVideoFrames(null)
+        super.onCleared()
+    }
+
+    private companion object {
+        const val TAG = "EditorViewModel"
+    }
+}
+
+/** One rung of a widget's resize ladder. */
+/**
+ * Zoom for the pending background image, stepped in whole percentage points.
+ *
+ * Same rule as the widget ladder, for the milder version of the same reason: the buttons
+ * multiplied by 1.02, so the step grew with the zoom — 100 → 102 → 104 → 106 → 108 → 110 →
+ * 113 — and percentages in the gaps could not be reached from either direction. After a
+ * pinch, which is continuous by design, the grid was whatever the gesture left behind:
+ * 137 → 140 → 143, never a round number again. Stepping the percentage and snapping to the
+ * grid makes every zoom reachable, every step the same size, and the readout predictable.
+ */
+internal fun steppedZoom(zoom: Float, grow: Boolean): Float {
+    val percent = (zoom * 100).roundToInt().coerceIn(MinZoomPercent, MaxZoomPercent)
+    val stepped = if (grow) {
+        (percent / ZoomStepPercent + 1) * ZoomStepPercent
+    } else {
+        // ceil, so a zoom between two rungs still moves down a whole step.
+        ((percent + ZoomStepPercent - 1) / ZoomStepPercent - 1) * ZoomStepPercent
+    }
+    return stepped.coerceIn(MinZoomPercent, MaxZoomPercent) / 100f
+}
+
+internal const val ZoomStepPercent = 2
+
+/** How far an image being placed may move: its centre, in panels from the face's. */
+internal const val MaxImageOffset = 2f
+internal const val MinZoomPercent = 25
+internal const val MaxZoomPercent = 800
+
+internal fun centeredPlacement(fit: ImageFit): ImagePlacement = ImagePlacement(fit = fit)
+
+/** Whether a picked file is read as frames — a GIF or a video — rather than as one still picture. */
+internal fun isMovingMedia(mimeType: String?): Boolean =
+    mimeType.equals("image/gif", ignoreCase = true) || mimeType?.startsWith("video/", ignoreCase = true) == true
+
+/** What the selected variant's moving background takes in the container: what replacing it frees. */
+internal fun EditorSnapshot.movingBackgroundBytes(): Int = movingBackground?.let {
+    animationAddedBytes(it.frames, it.entries, it.bounds?.width ?: preview.width, it.bounds?.height ?: preview.height)
+} ?: 0
+
+/** What adding a moving background frees: the moving one it replaces, and the still one deleted with it. */
+internal fun EditorSnapshot.freedByMovingBackground(): Int = movingBackgroundBytes() + stillBackgroundBytes
+
+/** The room a new moving background has: what is left under the watch's ceiling, plus what adding it frees. */
+internal fun EditorSnapshot.roomForMovingBackground(): Long =
+    (WATCH_CONTAINER_BYTE_CEILING - containerBytes).toLong() + freedByMovingBackground()
+
+/** The room a picture added on the Widgets page has: what is left under the watch's ceiling. */
+internal fun EditorSnapshot.roomForPicture(): Long = (WATCH_CONTAINER_BYTE_CEILING - containerBytes).toLong()
+
+/**
+ * Whether at least one frame of [this] fits [room] at [width] × [height]: the least a fitting
+ * keeps (a part one frame long, or a GIF too short to cut at its sparsest), so the most a size,
+ * a fit or a placement may grow what it stores.
+ */
+internal fun PendingAnimation.fitsAt(room: Long, width: Int, height: Int): Boolean =
+    if (part != null) animationAddedBytes(1, 1, width, height).toLong() <= room
+    else animationStepThatFits(read, room, width, height) != null
+
+/**
+ * Whether the moving background being placed may go from [before] to [after]: a frame still
+ * fits at what it covers there, or it covers no more of the face than it did. Larger, a pinch,
+ * Reset and a fit that would leave no room are refused, as a widget's Larger stops at the
+ * ceiling, rather than leaving frames placed that cannot be added.
+ */
+internal fun EditorSnapshot.movingBackgroundMayGo(pending: PendingAnimation, before: ImagePlacement, after: ImagePlacement): Boolean {
+    fun bounds(placement: ImagePlacement) =
+        movingBackgroundBounds(pending.read.width, pending.read.height, preview.width, preview.height, placement)
+    val next = bounds(after) ?: return true
+    if (pending.fitsAt(roomForMovingBackground(), next.width, next.height)) return true
+    val now = bounds(before) ?: return false
+    return next.width.toLong() * next.height <= now.width.toLong() * now.height
+}
+
+/**
+ * The largest rung of the picture's ladder that fits [room] — a still at its size, a moving one
+ * with a frame ([PendingAnimation.fitsAt]) — and never below the rung it is at, so Larger and a
+ * pinch stop where the face is full, as a widget's Larger does.
+ */
+internal fun PendingPicture.largestFittingPercent(room: Long): Int {
+    val ladder = prepared.ladder
+    val fitting = ladder.lastOrNull { rung ->
+        animation?.fitsAt(room, rung.width, rung.height)
+            ?: (pictureAddedBytes(rung.width, rung.height, prepared.opaque).toLong() <= room)
+    }
+    return maxOf(fitting?.percentOfOriginal ?: ladder.first().percentOfOriginal, size.percentOfOriginal)
+}
+
+/**
+ * The step a whole set takes, given the step each member could take on its own.
+ *
+ * As far as the most constrained member can go in the wanted direction, and never
+ * backwards: a member already past an edge reports a clamp of zero, which holds the set.
+ * Pure so a test can pin it.
+ */
+internal fun sharedNudgeStep(steps: List<Int>, wanted: Int): Int = when {
+    steps.isEmpty() || wanted == 0 -> 0
+    wanted > 0 -> steps.min().coerceIn(0, wanted)
+    else -> steps.max().coerceIn(wanted, 0)
+}

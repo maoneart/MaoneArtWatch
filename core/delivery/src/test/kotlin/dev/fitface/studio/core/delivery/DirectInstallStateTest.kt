@@ -1,0 +1,265 @@
+package dev.fitface.studio.core.delivery
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * The channel-handoff rules, which are the part of direct install users get stuck on.
+ *
+ * Two facts drive them: discovery needs the watch connected (so the stock plugin has
+ * to be holding it), and the peer handles stay valid once cached (so the plugin only
+ * has to let go afterwards, by any means).
+ */
+class DirectInstallStateTest {
+    private val ready = DirectInstallState(
+        environment = CompanionEnvironment(
+            pluginInstalled = true,
+            companionAppInstalled = true,
+            frameworkVerdict = FrameworkVerdict.USABLE,
+            probed = true,
+        ),
+        helperNearbyGranted = true,
+        watchfacePeerCached = true,
+        otaPeerCached = true,
+    )
+
+    @Test
+    fun revokingThePluginPermissionCountsAsReleasingTheChannel() {
+        val state = ready.copy(pluginNearbyGranted = false)
+
+        assertTrue(state.pluginChannelReleased)
+        assertTrue(state.setupComplete)
+    }
+
+    /**
+     * The channel can be freed in ways this app cannot see, so the acknowledgement has to
+     * count on its own — and it may not be inferred from the permission, which is still
+     * granted while the reader says the plugin has let go.
+     */
+    @Test
+    fun acknowledgementReleasesTheChannelWithThePermissionStillGranted() {
+        val granted = ready.copy(pluginNearbyGranted = true)
+        assertFalse(granted.pluginChannelReleased)
+        assertFalse(granted.setupComplete)
+        assertFalse(granted.isStepDone(SetupStep.PLUGIN_RELEASED))
+
+        val acknowledged = granted.copy(pluginNearbyReleaseAcknowledged = true)
+        assertTrue(acknowledged.pluginChannelReleased)
+        assertTrue(acknowledged.setupComplete)
+        assertTrue(acknowledged.isStepDone(SetupStep.PLUGIN_RELEASED))
+    }
+
+    /**
+     * The shape of every phone below API 31, and the reason step 4 reads differently
+     * there.
+     *
+     * `BLUETOOTH_CONNECT`/`BLUETOOTH_SCAN` became runtime permissions in Android 12, so
+     * `Fit3DirectInstaller.pluginNearbyGranted` answers null on anything older — there is
+     * no per-app switch to read. Null is not "released": the setup must stay incomplete
+     * until the reader says the plugin has let go, whatever they used to make it. The
+     * checklist says so in their own terms, which is why the on-screen strings are split
+     * on the same API level rather than on this field.
+     */
+    @Test
+    fun anUnobservablePermissionLeavesTheAcknowledgementAsTheOnlyWayThrough() {
+        val unknown = ready.copy(pluginNearbyGranted = null)
+
+        assertFalse("null is not evidence of release", unknown.pluginChannelReleased)
+        assertFalse(unknown.setupComplete)
+        assertFalse(unknown.isStepDone(SetupStep.PLUGIN_RELEASED))
+
+        val acknowledged = unknown.copy(pluginNearbyReleaseAcknowledged = true)
+        assertTrue(acknowledged.pluginChannelReleased)
+        assertTrue(acknowledged.setupComplete)
+        assertTrue(acknowledged.isStepDone(SetupStep.PLUGIN_RELEASED))
+    }
+
+    @Test
+    fun discoveryIsTheThirdStepAndPrecedesTheHandoff() {
+        val beforeDiscovery = ready.copy(
+            watchfacePeerCached = false,
+            otaPeerCached = false,
+            pluginNearbyGranted = true,
+        )
+
+        assertTrue(beforeDiscovery.isStepDone(SetupStep.COMPANION_PRESENT))
+        assertTrue(beforeDiscovery.isStepDone(SetupStep.HELPER_PERMISSION))
+        assertFalse(beforeDiscovery.isStepDone(SetupStep.PEERS_DISCOVERED))
+        assertFalse(beforeDiscovery.isStepDone(SetupStep.PLUGIN_RELEASED))
+    }
+
+    /**
+     * Discovery only runs while the plugin is holding the watch, so starting it
+     * proves the channel is held again — whatever the user said earlier.
+     */
+    @Test
+    fun rediscoveryVoidsAnEarlierReleaseAcknowledgement() {
+        val handedOver = ready.copy(
+            pluginNearbyGranted = true,
+            pluginNearbyReleaseAcknowledged = true,
+        )
+        assertTrue(handedOver.setupComplete)
+
+        val discovering = handedOver.discovering()
+
+        assertEquals(DirectInstallPhase.DISCOVERING, discovering.phase)
+        assertFalse("a claim made before the watch reconnected is void", discovering.pluginChannelReleased)
+        assertFalse(discovering.setupComplete)
+        assertFalse(discovering.peersCached)
+    }
+
+    /**
+     * The accessory framework's consent prompt closes itself after ten seconds, so the page
+     * has to say to expect it while discovery runs, and again when a discovery goes silent.
+     */
+    @Test
+    fun discoveryTellsTheReaderToAllowTheAccessoryPrompt() {
+        assertTrue(ready.discovering().message.contains("Allow"))
+        val timedOut = TimeoutRecovery.timedOut(ready.discovering(), DirectInstallPhase.DISCOVERING)
+        assertTrue(timedOut.message.contains("Allow"))
+    }
+
+    /**
+     * Retries repeat the same answers, and the report logs each new entry once, so every
+     * entry carries its attempt: a second silent attempt must not vanish as a duplicate.
+     */
+    @Test
+    fun discoveryAnswersAreNumberedByAttemptAndBounded() {
+        var state = ready.discovering()
+        state = withDiscoveryAnswer(state, "ota", "device_not_connected 1793")
+        state = withDiscoveryAnswer(state.discovering(), "ota", "device_not_connected 1793")
+
+        assertEquals(
+            listOf("#1 ota device_not_connected 1793", "#2 ota device_not_connected 1793"),
+            state.discoveryAnswers,
+        )
+
+        repeat(MAX_DISCOVERY_ANSWERS + 3) { state = withDiscoveryAnswer(state, "watchface", "peer_found 0") }
+        assertEquals(MAX_DISCOVERY_ANSWERS, state.discoveryAnswers.size)
+        assertEquals("#2 watchface peer_found 0", state.discoveryAnswers.last())
+    }
+
+    /** The answers are evidence for the report, so a timeout's rewind keeps them. */
+    @Test
+    fun aDiscoveryTimeoutKeepsWhatWasHeard() {
+        val heard = withDiscoveryAnswer(ready.discovering(), "watchface", "peer_found 0")
+
+        val timedOut = TimeoutRecovery.timedOut(heard, DirectInstallPhase.DISCOVERING)
+
+        assertEquals(heard.discoveryAnswers, timedOut.discoveryAnswers)
+        assertEquals(1, timedOut.discoveryAttempt)
+    }
+
+    /**
+     * The case this whole recovery path exists for: the transfer fails after the
+     * channel has been handed over, and the only way back is reconnecting the watch,
+     * discovering again, and handing the channel over again.
+     */
+    @Test
+    fun aFailedTransferRewindsToDiscoveryWithoutLosingTheEnvironment() {
+        val failed = ready.copy(
+            phase = DirectInstallPhase.FAILED,
+            pluginNearbyGranted = false,
+            failure = "The cached OTA peer is gone",
+            totalBytes = 4_096,
+            acknowledgedBytes = 512,
+        )
+        assertTrue("without a rewind the page stays on the transfer panel", failed.setupComplete)
+
+        val rewound = failed.rewoundToDiscovery()
+
+        assertFalse(rewound.isTerminal)
+        assertFalse(rewound.setupComplete)
+        assertFalse(rewound.peersCached)
+        assertFalse(rewound.pluginNearbyReleaseAcknowledged)
+        assertEquals("the reason survives into the checklist", "The cached OTA peer is gone", rewound.failure)
+        assertEquals(0, rewound.acknowledgedBytes)
+        // Nothing the phone told us about itself is thrown away: this is not a reset.
+        assertTrue(rewound.environment.probed)
+        assertTrue(rewound.helperNearbyGranted)
+        assertTrue(rewound.isStepDone(SetupStep.COMPANION_PRESENT))
+        assertTrue(rewound.isStepDone(SetupStep.HELPER_PERMISSION))
+        assertFalse(rewound.isStepDone(SetupStep.PEERS_DISCOVERED))
+        assertTrue("the checklist is back on discovery", rewound.awaitingDiscovery)
+    }
+
+    /**
+     * A revoked plugin permission before discovery is not progress. Reading it as a
+     * finished step 4 left the checklist claiming the handover was done while the
+     * discovery it depends on had not run.
+     */
+    @Test
+    fun theHandoverIsNotDoneBeforeThereArePeers() {
+        val revokedEarly = ready.copy(
+            watchfacePeerCached = false,
+            otaPeerCached = false,
+            pluginNearbyGranted = false,
+        )
+
+        assertTrue(revokedEarly.pluginChannelReleased)
+        assertFalse(revokedEarly.isStepDone(SetupStep.PLUGIN_RELEASED))
+        assertFalse(revokedEarly.setupComplete)
+        assertTrue(revokedEarly.awaitingDiscovery)
+    }
+
+    @Test
+    fun discoveryStopsBeingTheOutstandingStepOnceThePeersAreCached() {
+        assertFalse(ready.copy(pluginNearbyGranted = true).awaitingDiscovery)
+        assertTrue(ready.copy(otaPeerCached = false).awaitingDiscovery)
+    }
+
+    @Test
+    fun onePeerIsNotEnough() {
+        assertFalse(ready.copy(otaPeerCached = false).peersCached)
+        assertFalse(ready.copy(watchfacePeerCached = false).peersCached)
+        assertTrue(ready.peersCached)
+    }
+
+    @Test
+    fun needsWatchConnectionIsRecoverableRatherThanTerminal() {
+        val blocked = DirectInstallState(phase = DirectInstallPhase.NEEDS_WATCH_CONNECTION)
+
+        assertFalse("discovery without the plugin must not dead-end", blocked.isTerminal)
+        assertFalse(blocked.isActive)
+    }
+
+    @Test
+    fun completeAndFailedAreTheOnlyTerminalPhases() {
+        assertEquals(
+            setOf(DirectInstallPhase.COMPLETE, DirectInstallPhase.FAILED),
+            DirectInstallPhase.entries.filter {
+                DirectInstallState(phase = it).isTerminal
+            }.toSet(),
+        )
+    }
+
+    @Test
+    fun progressIsSafeBeforeTheTotalIsKnown() {
+        assertEquals(0f, DirectInstallState().progress, 0f)
+        assertEquals(
+            0.5f,
+            DirectInstallState(acknowledgedBytes = 50, totalBytes = 100).progress,
+            0f,
+        )
+    }
+
+    /**
+     * Steps 1 and 2 fold away once both hold, and come back on their own when either stops
+     * holding: nothing about them is remembered, so a revoked permission cannot hide.
+     */
+    @Test
+    fun thePhoneIsReadyOnlyWhileTheWatchAppIsFoundAndNearbyIsGranted() {
+        assertTrue(ready.phoneReady)
+        // Steps 3 and 4 have no say in it.
+        assertTrue(ready.copy(watchfacePeerCached = false, otaPeerCached = false).phoneReady)
+
+        assertFalse("revoked Nearby access", ready.copy(helperNearbyGranted = false).phoneReady)
+        assertFalse(
+            "no watch app or agent",
+            ready.copy(environment = ready.environment.copy(pluginInstalled = false, companionAppInstalled = false)).phoneReady,
+        )
+        assertFalse("not probed yet", ready.copy(environment = ready.environment.copy(probed = false)).phoneReady)
+    }
+}

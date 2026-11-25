@@ -1,0 +1,288 @@
+# Changelog
+
+User-visible changes per version. APKs are on the
+[releases page](https://github.com/satvikgosai/fitface-studio/releases); technical references are in
+the [documentation index](docs/README.md).
+
+<!--
+How to write this changelog
+
+- One section per released version, newest first:
+  `## <versionName> (code <versionCode>) — <tag date>`, with `Fixed:` before `Added:`.
+- Work not yet tagged goes under `## Unreleased`. When the release is tagged, rename that
+  heading to the version line above; do not start a second section for it.
+- Write for people who use the app: what they can now do, or what no longer goes wrong.
+  One short bullet per change, in plain words, with on-screen names in **bold**.
+- Leave out refactors, tests, documentation, version bumps, developer-only tools and
+  features that are built but hidden from users.
+- Leave out bugs that were introduced and fixed within the same unreleased cycle: users of
+  the last release never saw them. Describe the finished behaviour instead.
+- A bug fix says what went wrong for the user and what happens now, not the cause.
+  Detailed causes and safeguards belong in the canonical reference, linked from
+  [docs/README.md](docs/README.md).
+- The initial release is one line.
+-->
+
+## 0.3.1 (code `31`) — 2026-11-24
+
+Fixed:
+
+- On many phones not made by Samsung, **Find the watch for transfer** always timed out
+  saying the watch was not connected. A prompt now asks to let FitFace Studio access your
+  accessory; tap **Allow** once and the watch is found.
+- On a slow phone, an arrow tap could move a set more than one step, and **Undo** took a
+  held move back step by step. Each tap now moves one step, and one **Undo** undoes it all.
+- On **Install**, a step's ⓘ sat at the row's far edge when its name wrapped. It now
+  follows the name.
+- With an image left unplaced, **Add image** in the **Layers** controls seemed to do
+  nothing. It now opens the one you left, or a new one.
+
+Added:
+
+- **Add text** on **Widgets** and in the **Layers** controls, in any of your phone's fonts
+  or a font file, placed and coloured like a picture. A face's own label, such as "steps",
+  can be redrawn the same way with **Draw in another font** in **Edit widget**.
+- **Clock font**, in the **Layers** controls, redraws a clock made of pictures of digits in
+  another font and colour, in this style or all of them. **Reset font** brings its own
+  digits back.
+- Hold the face to compare it with how it is now, wherever a change is previewed.
+- **Send your photos**, up to 7, to the watch's Photos face from its card in **Watch
+  faces**, and choose its clock's style and colour, or **No clock**.
+
+## 0.3.0 (code `30`) — 2026-11-10
+
+Fixed:
+
+- On a face with several styles, replacing, adding or importing a background changed it in
+  every style. It now changes the selected style, unless you choose **All styles**.
+- Adding text widgets from other faces again and again could run out of room for their
+  fonts. Imported text now shares the fonts the face already has.
+- The **Projects** tab showed **0** projects while it was still reading them. It now says
+  it is loading, and projects open faster.
+- A quick second tap could open two projects at once.
+- Opening a project no longer flashes a second loading screen.
+- **IMPORT** on **Projects**, and the project list, were greyed out while the watch-face
+  catalogue refreshed. They now stay usable.
+- **Remove** now deletes a widget with its artwork, freeing room for GIFs and videos.
+  **Undo** brings it back; **Restore** is gone.
+
+Added:
+
+- **Undo** and **Redo** under the face, one step for each change, kept until you leave
+  the project.
+- **Add an image, GIF or video**, on the **Widgets** page or as a background. It plays on
+  the Canvas as on the watch, keeping every frame of the longest part that fits; choose the
+  part, fewer frames, or **NATIVE** size to fit more.
+- **Remove background**, freeing its room. Any new background now replaces the current
+  one, moving or still.
+- Choose **This style only** or **All styles** when replacing, adding or importing a
+  background.
+- Swipe the controls under a selected widget for two more pages: **Colour**, with
+  one-tap colours, a hex code and sliders, and **Layers**, with layer order, the
+  all-styles switch, and buttons to add widgets, images or videos.
+- The face stays in view at the top of editing pages while their controls scroll.
+  Position, size and colour work the same way on every page, and a position can be
+  typed exactly.
+- Widgets can sit partly off the edge of the face.
+- Each new custom face gets its own face number, from 201 to 250, so it installs beside
+  your other faces instead of replacing one.
+- **Install** checks that a face's number and styles agree before sending, warns about
+  styles with no widgets, lists likely reasons if the watch does not change face, and
+  folds its one-time setup steps into **Phone ready** once done.
+- Editing pages show their controls first: explanations are behind an **ⓘ** you can tap,
+  and a gesture you have not used yet gets a one-line hint until you try it.
+- Adding widgets and backgrounds from other faces is no longer marked **Experimental**.
+- After **Update thumbnail**, the **Projects** list shows that project with its new
+  face-picker thumbnail, the picture the watch's face picker shows.
+
+## 0.2.1 (code `21`) — 2026-10-07
+
+Fixed:
+
+- On faces with many widgets, a duplicated or restored widget could appear somewhere
+  else, even outside the face. Copies now appear beside their original, and restored
+  widgets return to where they were.
+- **Duplicate** placed the copy exactly on top of its original, so an accidental tap
+  went unnoticed. The copy now lands a few pixels to the side.
+- Removing a copy made with **Duplicate** deletes it instead of adding it to the
+  Removed list. Removed originals can still be restored.
+- Holding the widget that was already selected now starts selecting several.
+
+Added:
+
+- Rotate text, lines, arc gauges and pictures in 15° steps, or to an exact angle, with
+  **Reset rotation** to return to the original. Pictures are redrawn from their
+  original artwork.
+- Set text, lines and arc gauges to any colour, using a one-tap colour, sliders or a hex
+  code. **Reset colour** returns each style to its own original colour.
+- Bring a widget to the front or send it behind others.
+- **Edit widget**, the last button under a selected widget, holds rotation, colour,
+  layer order and the switch for editing matching widgets in all styles.
+- Copy the background from another watch face, with a before-and-after review.
+- Delete styles you do not use, each showing how much space it frees. When an edit
+  needs more room than the watch allows, the app offers to delete styles and keeps
+  the edit waiting.
+- **Export** a project to a ZIP file from its menu, and **Import** it later on the
+  Projects tab, on this phone or another.
+- A **+** on each widget in the Widgets list adds it to a selection without holding.
+
+## 0.2.0 (code `20`) — 2026-09-29
+
+Fixed:
+
+- Widget previews, outlines and tap targets now respect edge and widget alignment.
+  Removing widgets or adding backgrounds preserves that alignment; removing a widget
+  others still depend on is blocked with an explanation.
+- Holding a nudge could lose steps while an edit saved, and dragging back to the last
+  saved position could leave an earlier move in place.
+- Removed widgets restore with the correct artwork after other widgets are resized.
+  Even an emptied style can have widgets restored or a background added without
+  resetting the project.
+- Editor navigation stays reachable in short landscape windows and with larger text.
+- The update dialog keeps its buttons in place between checking and downloading.
+- Cancelled downloads stop promptly, and an immediate retry no longer loses its file.
+- Transfer completion now says **Request sent**, rather than **Installed**. The result
+  still needs to be checked on the watch.
+
+Added:
+
+- A dedicated **Canvas** page with move, size, colour, duplicate and remove controls
+  below the face. Project options stay in the header, with **EDITED** visible there.
+- Select several widgets to move, duplicate or remove together. Moving keeps their
+  spacing; if a batch stops, the app reports how many changes were saved.
+- Add supported widgets from another face: choose one or several, review them on your
+  face, then add them to the selected style or always-on display. Partial imports report
+  what was saved and let you continue past a refused widget.
+- Imported widgets can be removed permanently, freeing unused artwork space. Removed
+  stock widgets remain available to restore.
+- **Start a custom face** with a clock on an empty panel, then add a background and
+  widgets. It uses Info_4's watch slot, replacing that face or the previous custom face.
+- Edit the **Always-on display** separately, including its supported widgets and
+  background. Edits to numbered styles leave it unchanged.
+- Widget edits now start with the selected style only. **Edit matching widgets in all
+  styles** lets you apply them to other numbered styles where the widget exists.
+- Resize supported images, clock hands, arcs, bars and lines as well as sprites, in
+  consistent 5% steps. Resized artwork has smoother edges.
+- Hold a nudge arrow to move progressively faster; a tap still moves one pixel.
+- Canvas previews draw the current artwork, supported text, clock hands and gauges
+  using sample readings. Fonts and some watch content can still differ.
+- Widgets name known readings such as steps, battery and heart rate, and identify more
+  widget types instead of labelling them **Other**.
+- Styles are labelled **Style 1**, **Style 2**, and so on throughout the app. The Styles
+  page also shows the current and proposed watch-picker thumbnail before updating it.
+- Preview review, checks, watch setup and transfer now share the **Install** page.
+  Optional explanations throughout the app open in labelled details sections.
+
+## 0.1.3 (code `19`) — 2026-08-30
+
+Added:
+
+- More than one project on the same watch face. Each is named when you start it, and you
+  can rename it from the projects list or from the editor's **Project** page.
+- Opening a face you have already worked on lists your projects on it, so you can carry
+  on with the right one instead of guessing.
+- **Update** on a face the store has published a newer version of. It starts a fresh
+  project on the new version and leaves the ones you already have exactly as they were.
+- Search and sort on **Your projects**, and every sort now reverses — tap the one already
+  chosen to flip it.
+- Duplicate a project, from its row in the list or from inside it. The copy carries the
+  edits the original had and is independent of it from then on.
+- Deleting a project asks first and names the one it would remove, from the projects list
+  or from inside the project itself.
+- Install setup for phones with no **Nearby devices** switch for the watch plugin, where
+  freeing the accessory channel takes a different route. The checklist shows whichever one
+  applies to your phone and never both.
+
+Fixed:
+
+- The list of watch faces could stop short of the whole catalogue and stay that way for a
+  week: a store error on a later page read as the end of the list.
+- A transfer that had already timed out could go on to report the face as installed, and
+  **Reconnect the watch and discover again** dropped straight back into the failure it was
+  leaving — which left the whole four-step setup as the only way on.
+- The install checklist offered disconnecting the watch in its companion app as a way to
+  free the accessory channel. It does not free it, and nothing on the page says so any more.
+- An install failure was printed twice, once in a box and once plain underneath it.
+- An edit that failed to save could come back the next time you opened the project, as
+  though it had worked.
+- Removing a widget left the editor on a page describing nothing, with the back arrow as
+  the only way out. It returns you to the widget list.
+- A face already on your device still offered to download it, then reopened the project
+  you already had without saying so.
+- Two projects on the same face looked identical in the list and traded places every time
+  you opened either one. They now carry their own name and the style they were started
+  on, and the list is ordered by when you last edited them.
+- On a narrow phone the last sort chip ran off the side of the screen.
+- Opening a project showed nothing at all while it happened, and it takes a few seconds,
+  so the tap looked as though it had missed. The row you picked now says it is opening and
+  the others go quiet until it has.
+
+## 0.1.2 (code `18`) — 2026-08-25
+
+Added:
+
+- A menu in the header of both screens, holding **Report a problem**, **About this app**
+  and **Check for update**.
+- **Check for update** finds a newer release, tells you the size, downloads it and
+  installs it. It keeps going if you close the dialog, and stops if the new build was
+  signed with a different key — installing that would mean uninstalling first, which
+  deletes every saved project.
+- **About this app** shows which version you are running, which nothing did before, and
+  links to the project page for the source, the full notices and the releases.
+
+Fixed:
+
+- **Install over Bluetooth** said the watch companion app was not installed on phones
+  where it is — it ships under a second name on some models, the Galaxy A10s and A11
+  among them. Those phones could not get past step 1.
+- A phone the app cannot recognise no longer blocks **Install over Bluetooth**. It says
+  what it could not find and lets you try anyway — only the attempt can tell whether the
+  watch answers.
+- Every editor page cut off its own subtitle: "face 00112 · style0" showed as
+  "face 00112 · styl…". The header carries one small menu button now, so the title has
+  room.
+- On the library screen that button no longer jumps sideways when you switch between
+  Watch faces and Projects, and it lines up with the heading beside it.
+- Switching between **Watch faces** and **Projects** no longer moves the two tabs up or
+  down the screen, so the one you just tapped stays where you tapped it.
+- Warning text — the "Opaque" note on a widget, the "Edited" badge, the install status —
+  was almost unreadable in light mode, and is legible now.
+- Holding the phone sideways shrank the watch face in the editor to a third of its size,
+  and tapping a widget shrank it to a dot. Sideways, the face is now beside its controls
+  at full size.
+- Opening a project sideways showed a grey placeholder with the spinner and "decoding
+  images" cut off below the bottom of the screen.
+- Coordinates and sizes in the inspector no longer shift about as you nudge them.
+- Rows in the widget list no longer wrap the word "frames" onto a line of its own.
+- Small grey text — section headings, the record line under each widget, a project's age
+  — was too faint, and worse in light mode. All of it is brighter.
+
+Changed:
+
+- The **Report a problem** note says what the report contains and stops there. It used to
+  list what it leaves out, which read as though the app were holding that back.
+- A crash in the previous run tints the header menu and its report entry instead of
+  replacing the button; a screen reader still announces it as **Report crash**.
+- The list of watch faces is kept for a week instead of half a day. **Refresh** on the
+  Watch faces tab still fetches the latest whenever you want.
+
+## 0.1.1 (code `17`) — 2026-08-18
+
+Fixed:
+
+- Empty catalogue on phones whose locale the store refuses — `es_419` (default Spanish in
+  Latin America), `en_001`, `en_150`, Indonesian, Hebrew, Yiddish, Filipino, Tagalog,
+  Quechua, Guaraní. Repaired where the region alone is at fault, retried in `en_US`
+  otherwise.
+- "Catalogue unavailable" no longer blames your connection; it shows the real reason.
+- A failed refresh keeps the cached catalogue instead of emptying the list.
+
+Added:
+
+- **Report a problem** on both screens: a copyable report of the app version, this phone,
+  and what the app did. Carries no device identifiers, watch addresses or image details.
+- A crash in the previous run is offered as **Report crash** on the next launch.
+
+## 0.1.0 (code `16`) — 2026-08-14
+
+Initial release.

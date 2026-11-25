@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FitFace Studio — design system</title>
+<!--
+  A self-contained visual reference for :core:ui. One file, no build step, no server,
+  no network: it must keep working from a fresh clone with no internet, so do not add a
+  CDN script, a webfont link or an external image to it.
+
+  It deliberately uses the platform sans and mono stacks rather than IBM Plex, because
+  that is what the app itself uses — FontFamily.SansSerif and FontFamily.Monospace. See the implementation rules below.
+
+  Every value here is transcribed from FitFaceTheme.kt and FitFaceComponents.kt. Those
+  files are the authority; if this page disagrees with them it is stale. Update this page and the Kotlin together.
+-->
+<style>
+  :root {
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* DarkColors — FitFaceTheme.kt */
+    --d-primary: #7FE3D2;      --d-on-primary: #062E29;
+    --d-primary-ctr: #00504A;  --d-on-primary-ctr: #C2FFF4;
+    --d-secondary: #F2C879;    --d-tertiary: #C8B6FF;
+    --d-background: #0A0E0E;   --d-on-background: #E6EDEA;
+    --d-surface-variant: #18201F;
+    --d-sc-lowest: #080B0B;    --d-sc-low: #101615;
+    --d-sc: #18201F;           --d-sc-high: #222B29;   --d-sc-highest: #2B3533;
+    --d-on-surface: #E6EDEA;   --d-on-surface-var: #99A5A1;
+    --d-outline: #596460;      --d-outline-variant: #2C3533;
+    --d-error: #FFAF9F;
+    --d-warning: #F2C879;      --d-experimental: #C8B6FF;
+
+    /* LightColors — FitFaceTheme.kt */
+    --l-primary: #006B60;      --l-on-primary: #FFFFFF;
+    --l-primary-ctr: #C0F3E9;  --l-on-primary-ctr: #003731;
+    --l-secondary: #775B16;    --l-tertiary: #62558B;
+    --l-background: #F7FAF9;   --l-on-background: #171D1B;
+    --l-surface-variant: #E4ECE9;
+    --l-sc-lowest: #FFFFFF;    --l-sc-low: #F1F5F3;
+    --l-sc: #EAEFED;           --l-sc-high: #E1E8E5;   --l-sc-highest: #D8E0DD;
+    --l-on-surface: #171D1B;   --l-on-surface-var: #4A5551;
+    --l-outline: #75817D;      --l-outline-variant: #C5CECB;
+    --l-error: #A73A2E;
+    --l-warning: #775B16;      --l-experimental: #62558B;
+  }
+
+  /* The demo surfaces resolve against whichever scheme the panel is showing. */
+  .scheme-dark {
+    --primary: var(--d-primary); --on-primary: var(--d-on-primary);
+    --primary-ctr: var(--d-primary-ctr); --on-primary-ctr: var(--d-on-primary-ctr);
+    --background: var(--d-background); --on-background: var(--d-on-background);
+    --sc-low: var(--d-sc-low); --sc: var(--d-sc); --sc-high: var(--d-sc-high);
+    --sc-lowest: var(--d-sc-lowest); --sc-highest: var(--d-sc-highest);
+    --surface-variant: var(--d-surface-variant);
+    --on-surface: var(--d-on-surface); --on-surface-var: var(--d-on-surface-var);
+    --outline: var(--d-outline); --outline-variant: var(--d-outline-variant);
+    --error: var(--d-error); --warning: var(--d-warning); --experimental: var(--d-experimental);
+  }
+  .scheme-light {
+    --primary: var(--l-primary); --on-primary: var(--l-on-primary);
+    --primary-ctr: var(--l-primary-ctr); --on-primary-ctr: var(--l-on-primary-ctr);
+    --background: var(--l-background); --on-background: var(--l-on-background);
+    --sc-low: var(--l-sc-low); --sc: var(--l-sc); --sc-high: var(--l-sc-high);
+    --sc-lowest: var(--l-sc-lowest); --sc-highest: var(--l-sc-highest);
+    --surface-variant: var(--l-surface-variant);
+    --on-surface: var(--l-on-surface); --on-surface-var: var(--l-on-surface-var);
+    --outline: var(--l-outline); --outline-variant: var(--l-outline-variant);
+    --error: var(--l-error); --warning: var(--l-warning); --experimental: var(--l-experimental);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 80px;
+    font-family: var(--sans);
+    background: #0a0c0c; color: #e6edea;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 40px 32px 28px;
+    border-bottom: 1px solid rgba(255,255,255,.09);
+  }
+  h1 { margin: 0 0 10px; font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
+  .lede { margin: 0; max-width: 78ch; font-size: 13.5px; line-height: 1.75; color: #99A5A1; }
+  .lede code, code.i { font-family: var(--mono); font-size: 12px; color: #7fe3d2; }
+  .lede strong { color: #e6edea; font-weight: 600; }
+
+  section { padding: 34px 32px 8px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  h2 {
+    margin: 0 0 6px; font: 600 11px var(--mono); letter-spacing: .16em;
+    text-transform: uppercase; color: #7fe3d2;
+  }
+  .note { margin: 0 0 22px; max-width: 82ch; font-size: 12.5px; line-height: 1.7; color: #99A5A1; }
+  .note strong { color: rgba(230,237,234,.85); font-weight: 600; }
+
+  table { border-collapse: collapse; font-size: 12.5px; margin: 0 0 20px; }
+  th, td { text-align: left; padding: 7px 16px 7px 0; vertical-align: middle; }
+  th { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: #99A5A1; border-bottom: 1px solid rgba(255,255,255,.1); }
+  td { border-bottom: 1px solid rgba(255,255,255,.05); }
+  td.m, .m { font-family: var(--mono); font-size: 11.5px; color: #99A5A1; }
+
+  .sw { width: 46px; height: 26px; border-radius: 5px; border: 1px solid rgba(255,255,255,.14); display: inline-block; vertical-align: middle; }
+  .ratio { font-family: var(--mono); font-size: 11.5px; }
+  .pass { color: #7fe3d2; } .fail { color: #ffaf9f; }
+
+  /* A phone-width panel that renders components against a real scheme. */
+  .panels { display: flex; flex-wrap: wrap; gap: 26px; }
+  .panel {
+    /* 360px stands in for a 360dp phone, but never wider than the space available —
+       a fixed width here scrolls the whole page sideways on a narrow window. */
+    width: 360px; max-width: 100%; flex: none; border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,.1);
+    background: var(--background); color: var(--on-surface);
+    font-family: var(--sans);
+  }
+  .panel-tag {
+    font: 600 9.5px var(--mono); letter-spacing: .14em; text-transform: uppercase;
+    padding: 8px 14px; background: rgba(255,255,255,.04);
+    color: #99A5A1; border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .scheme-light .panel-tag { color: #4A5551; background: rgba(0,0,0,.04); border-bottom-color: rgba(0,0,0,.09); }
+  .panel-body { padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+  .caption { font: 500 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--on-surface-var); }
+
+  /* ---- component recreations. Numbers come from FitFaceComponents.kt. ---- */
+  /*
+    The bar must span the panel's full 360px, not 360 minus the body padding. The real bar
+    gets the whole screen width and applies its own 16dp padding, so an inset demo is 28px
+    narrower than reality — narrow enough to ellipsize the subtitle here while the device
+    does not, which would misrepresent the very rule this page states.
+  */
+  .bleed { margin-left: -14px; margin-right: -14px; }
+  .top-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--background); }
+  .icon-btn {
+    width: 38px; height: 38px; flex: none; border-radius: 8px;
+    border: 1px solid var(--outline-variant); background: transparent;
+    color: var(--on-surface); font: 400 17px var(--sans);
+    display: flex; align-items: center; justify-content: center; cursor: default;
+  }
+  .icon-btn.warn { color: var(--warning); }
+  .bar-titles { flex: 1; min-width: 0; }
+  .bar-title { font: 600 15px/20px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-sub { font: 500 11px/16px var(--mono); letter-spacing: .3px; color: var(--on-surface-var); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font: 600 9.5px var(--mono); letter-spacing: 1.3px; padding: 4px 7px; border-radius: 4px; background: color-mix(in srgb, var(--warning) 13%, transparent); color: var(--warning); flex: none; }
+
+  .fit-btn { min-height: 46px; border-radius: 8px; font: 600 13px var(--sans); padding: 0 18px; border: none; cursor: default; display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+  .fit-btn.primary { background: var(--primary); color: var(--on-primary); }
+  .fit-btn.secondary { background: transparent; color: var(--on-surface); border: 1px solid color-mix(in srgb, var(--on-surface) 38%, transparent); }
+  .fit-btn.danger { background: transparent; color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 38%, transparent); }
+  .fit-btn.experimental { background: transparent; color: var(--experimental); border: 1px solid color-mix(in srgb, var(--experimental) 38%, transparent); }
+  .fit-btn.disabled { background: color-mix(in srgb, var(--on-surface) 5%, transparent); color: color-mix(in srgb, var(--on-surface) 28%, transparent); }
+  .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor;
+          border-right-color: transparent; animation: spin 900ms linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+  .chip { min-height: 42px; border-radius: 999px; padding: 8px 14px; font: 500 11px var(--mono); letter-spacing: .3px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--outline-variant); color: var(--on-surface-var); background: transparent; }
+  .chip.sel { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 13%, transparent); }
+  .chip.dis { opacity: .7; color: color-mix(in srgb, var(--on-surface) 28%, transparent); border-color: color-mix(in srgb, var(--outline-variant) 45%, transparent); }
+
+  .banner { display: flex; gap: 11px; align-items: flex-start; padding: 13px 14px; border-radius: 0 9px 9px 0; }
+  .banner .rule { width: 2px; min-height: 34px; flex: none; }
+  .banner .lbl { font: 500 12px/16px var(--mono); flex: none; }
+  .banner .msg { font: 400 13px/20px var(--sans); color: color-mix(in srgb, var(--on-surface) 82%, transparent); }
+  .banner.pass { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+  .banner.pass .lbl { color: var(--primary); }
+  .banner.pass .rule { background: var(--primary); }
+  .banner.warn { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+  .banner.warn .rule { background: var(--warning); } .banner.warn .lbl { color: var(--warning); }
+  .banner.fail { background: color-mix(in srgb, var(--error) 8%, transparent); }
+  .banner.fail .rule { background: var(--error); } .banner.fail .lbl { color: var(--error); }
+
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--sc-low); border: 1px solid var(--outline-variant); }
+  .row .thumb { width: 44px; height: 62px; border-radius: 6px; background: var(--sc-high); border: 1px solid var(--outline-variant); flex: none; }
+  .row .mid { flex: 1; min-width: 0; }
+  .row .name { font: 600 13px/18px var(--sans); }
+  .row .badges { display: flex; gap: 7px; margin-top: 2px; }
+  .micro { font: 600 9.5px var(--mono); letter-spacing: 1.3px; text-transform: uppercase; color: var(--on-surface-var); }
+  .micro.warn { color: var(--warning); opacity: 1; }
+  .micro.type { color: var(--experimental); opacity: 1; }
+  .row .meta { font: 500 11px/16px var(--mono); letter-spacing: .3px; color: var(--on-surface-var); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .coords { font: 500 12px/16px var(--mono); color: var(--on-surface-var); flex: none; }
+
+  .readout-card { padding: 12px; border-radius: 8px; background: var(--sc-low); border: 1px solid var(--outline-variant); }
+  .readout-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .readout { font: 600 20px/24px var(--mono); color: var(--on-surface); }
+  .nudge-row { display: flex; gap: 7px; margin-top: 10px; }
+  .nudge { flex: 1; min-height: 44px; border-radius: 7px; border: 1px solid var(--outline-variant); background: color-mix(in srgb, var(--on-surface) 4%, transparent); color: var(--on-surface); font: 400 15px var(--sans); display: flex; align-items: center; justify-content: center; }
+
+  /* IA map */
+  .ia { display: flex; gap: 0; align-items: flex-start; flex-wrap: wrap; }
+  .ia-col { flex: none; display: flex; flex-direction: column; gap: 8px; min-width: 172px; }
+  .ia-h { font: 600 9px var(--mono); letter-spacing: .14em; color: #99A5A1; margin-bottom: 2px; }
+  .ia-page { padding: 10px 12px; background: #18201f; border: 1px solid rgba(127,227,210,.28); border-radius: 8px; font: 600 12px var(--sans); }
+  .ia-page span { display: block; font: 400 10.5px var(--mono); color: #99A5A1; margin-top: 3px; }
+  .ia-peek { padding: 9px 12px; background: rgba(200,182,255,.05); border: 1px dashed rgba(200,182,255,.24); border-radius: 8px; font: 400 11.5px/1.4 var(--sans); color: #99A5A1; }
+  .ia-peek span { display: block; font: 400 9.5px var(--mono); color: #c8b6ff; margin-top: 3px; }
+  .ia-arm { flex: none; width: 34px; padding-top: 46px; display: flex; justify-content: center; }
+  .ia-arm div { width: 100%; height: 1px; background: rgba(127,227,210,.3); }
+
+  .toggle { display: inline-flex; gap: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; overflow: hidden; margin: 0 0 22px; }
+  .toggle button { font: 600 11px var(--mono); letter-spacing: .08em; padding: 9px 16px; background: transparent; color: #99A5A1; border: none; cursor: pointer; }
+  .toggle button[aria-pressed="true"] { background: #7fe3d2; color: #062e29; }
+
+  /* ---- editor rail ---- */
+  .rail { display: flex; min-height: 58px; background: var(--sc-lowest); align-items: center; }
+  .rail-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px; color: var(--on-surface-var); }
+  .rail-item.sel { color: var(--primary); }
+  .rail-glyph { font: 500 12px/16px var(--mono); }
+  .rail-label { font: 600 9.5px var(--mono); letter-spacing: 0; text-transform: uppercase; }
+
+  /* ---- selection peek ---- */
+  .peek { background: var(--sc); padding: 12px 16px; }
+  .peek-top { display: flex; align-items: center; gap: 10px; }
+  .peek-accent { width: 3px; height: 24px; background: var(--primary); flex: none; }
+  .peek-name { font: 600 13px/18px var(--sans); }
+  .peek-geo { font: 500 12px/16px var(--mono); color: var(--primary); }
+  .peek-nudges { display: flex; gap: 7px; margin-top: 10px; }
+
+  /* ---- library cards ---- */
+  .face-card { border-radius: 10px; background: var(--sc-low); border: 1px solid var(--outline-variant); padding: 8px; width: 152px; }
+  .face-shot { width: 100%; aspect-ratio: 256/402; border-radius: 8px; background: var(--sc-high); position: relative; display: flex; align-items: center; justify-content: center; }
+  .face-shot .stub { font: 500 11px var(--mono); color: var(--on-surface-var); }
+  .face-name { font: 600 13px/18px var(--sans); padding: 10px 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .face-meta { display: flex; justify-content: space-between; padding: 5px 3px; font: 500 11px var(--mono); }
+  .face-id { color: var(--primary); }
+  .face-styles { color: var(--on-surface-var); }
+  .not-editable { position: absolute; left: 6px; bottom: 6px; background: var(--sc-highest); border-radius: 4px; padding: 3px 6px; font: 600 9.5px var(--mono); letter-spacing: 1.3px; color: var(--on-surface-var); }
+
+  .proj-row { display: flex; align-items: center; gap: 13px; min-height: 84px; border-radius: 10px; background: var(--sc-low); border: 1px solid var(--outline-variant); padding: 12px 6px 12px 14px; }
+  .proj-thumb { width: 44px; height: 62px; border-radius: 5px; background: var(--sc-high); flex: none; }
+  .proj-mid { flex: 1; min-width: 0; }
+  .proj-name { font: 600 15px/20px var(--sans); }
+  /* The app sets maxLines = 1 with an ellipsis on both of these; wrapping here would
+     misrepresent how a long source filename actually behaves. */
+  .proj-meta { font: 500 11px/16px var(--mono); color: var(--on-surface-var); margin-top: 3px;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .proj-age { font: 500 11px/16px var(--mono); color: color-mix(in srgb, var(--on-surface-var) 90%, transparent); margin-top: 3px; }
+  .glyph-btn { font: 400 17px var(--sans); color: var(--on-surface-var); padding: 0 8px; }
+
+  /* ---- search field ---- */
+  .search { display: flex; align-items: center; gap: 12px; border: 1px solid var(--outline-variant); border-radius: 14px; padding: 14px 16px; color: var(--on-surface-var); }
+  .search .q { font: 400 14px var(--sans); }
+
+  /* ---- section heading ---- */
+  .sect-detail { font: 400 12px/17px var(--sans); color: var(--on-surface-var); margin-top: 5px; }
+
+  /* ---- validation check ---- */
+  .check { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--sc-low); }
+  .check .mark { font: 500 12px var(--mono); }
+  .check .mark.ok { color: var(--primary); } .check .mark.bad { color: var(--error); }
+  .check .lbl { flex: 1; font: 400 13px/20px var(--sans); }
+  .check .res { font: 500 12px var(--mono); color: var(--on-surface-var); }
+
+  /* ---- install step ---- */
+  .step { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; }
+  .step-dot { width: 22px; height: 22px; border-radius: 11px; flex: none; display: flex; align-items: center; justify-content: center;
+              font: 600 9.5px var(--mono); border: 1px solid var(--outline-variant); color: var(--on-surface-var); }
+  .step-dot.done { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 16%, transparent); }
+  .step-title { font: 600 15px/20px var(--sans); }
+  .step-sub { font: 500 11px/16px var(--mono); color: var(--on-surface-var); margin-top: 2px; }
+  .step.pending .step-title, .step.pending .step-sub { }
+
+  /* ---- device badge ---- */
+  .dev-badge { font: 600 9.5px var(--mono); letter-spacing: 1.3px; padding: 4px 7px; border-radius: 4px; }
+  .dev-badge.linked { color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent); }
+  .dev-badge.setup, .dev-badge.checking { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+  .dev-badge.missing { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+
+
+  /* ---- empty state ---- */
+  .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 8px 0; }
+  .empty-plate { width: 44px; height: 44px; border-radius: 10px; background: var(--sc-low); border: 1px solid var(--outline-variant); display: flex; align-items: center; justify-content: center; font: 400 17px var(--sans); color: var(--on-surface-var); }
+  .empty-title { font: 600 15px/20px var(--sans); }
+  .empty-body { font: 400 13px/20px var(--sans); color: var(--on-surface-var); }
+
+  /* ---- reference facts: FitDetails ---- */
+  .fit-details { border: 1px solid var(--outline-variant); border-radius: 8px; background: var(--sc-low); }
+  .fit-details summary { min-height: 48px; padding: 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; font: 500 9.5px var(--mono); letter-spacing: 1.3px; color: var(--on-surface-var); }
+  .fit-details summary::-webkit-details-marker { display: none; }
+  .fit-details summary::after { content: "▾"; margin-left: auto; font: 400 13px var(--sans); }
+  .fit-details[open] summary::after { content: "▴"; }
+  .fit-details .details-body { padding: 0 14px 14px; font: 400 12px/18px var(--sans); color: var(--on-surface-var); }
+
+  /* ---- explanations: FitInfo (ⓘ and its bubble) ---- */
+  .fit-info { position: relative; display: inline-block; }
+  .fit-info summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font: 500 9.5px var(--mono); letter-spacing: 1.3px; color: var(--on-surface-var); }
+  .fit-info summary::-webkit-details-marker { display: none; }
+  .info-glyph { width: 10px; height: 10px; border: 1.3px solid currentColor; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font: 700 7px var(--sans); letter-spacing: 0; }
+  .fit-info[open] .info-glyph { color: var(--primary); }
+  .fit-info .bubble { margin-top: 6px; max-width: 300px; padding: 14px; border: 1px solid var(--outline); border-radius: 8px; background: var(--sc-high, var(--sc-low)); font: 400 12px/18px var(--sans); color: var(--on-surface); }
+
+  /* ---- glyph inventory ---- */
+  .glyphs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .glyph-cell { width: 92px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 10px 8px; text-align: center; background: #101615; }
+  .glyph-cell .g { font-size: 17px; color: #e6edea; }
+  .glyph-cell .n { font: 500 9.5px var(--mono); color: #99A5A1; margin-top: 6px; letter-spacing: .06em; }
+
+  .nudge.compact { min-height: 38px; }
+  .selection-actions { display: flex; gap: 5px; margin-top: 7px; }
+  .selection-actions .icon-btn { flex: 1; min-width: 0; width: auto; }
+  .rules { overflow-wrap: anywhere; }
+  .rules h3 { margin: 32px 0 12px; font-size: 18px; }
+  .rules ul { padding-left: 22px; max-width: 960px; line-height: 1.65; }
+  .rules li { margin-bottom: 12px; }
+  .rules code { font-size: .88em; }
+  a { color: #7FE3D2; text-underline-offset: 3px; }
+  nav { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 24px; }
+  .hidden { display: none !important; }
+
+  /* Wide content scrolls inside itself; the page body must never scroll sideways. */
+  .scroller { overflow-x: auto; margin: 0 0 20px; }
+  .scroller table { margin-bottom: 0; }
+  @media (max-width: 600px) {
+    header, section { padding-left: 18px; padding-right: 18px; }
+    .ia-arm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FitFace Studio — design system</h1>
+  <p class="lede">
+    The visual reference for <code>:core:ui</code>. Everything below is transcribed from
+    <code>FitFaceTheme.kt</code> and <code>FitFaceComponents.kt</code>; <strong>those files are
+    the authority</strong> and this page is stale if it disagrees with them.
+    <a href="#implementation-rules">Implementation rules</a> below cover copy, interaction,
+    accessibility and known departures from the original design.
+  </p>
+  <p class="lede" style="margin-top:12px">
+    <strong>This file is self-contained on purpose.</strong> No build step, no server, no
+    network: it has to render from a fresh clone on a plane. Do not add a CDN script, a
+    webfont link or an external image to it.
+  </p>
+<nav aria-label="Page sections"><a href="#colour">Colour</a><a href="#type">Type</a><a href="#components">Components</a><a href="#glyphs">Glyphs</a><a href="#screens">Screens</a><a href="#implementation-rules">Implementation rules</a></nav>
+</header>
+
+<section>
+  <h2 id="colour">Colour</h2>
+  <p class="note">
+    One teal accent, three semantic hues, and a surface ladder that expresses elevation as
+    <strong>lighter surfaces plus a 1dp border</strong> — never a shadow. <code class="i">warning</code>
+    and <code class="i">experimental</code> are not part of a Material scheme, so
+    <code class="i">FitFaceTheme</code> provides them through
+    <code class="i">LocalFitFaceSemanticColors</code>; they carry different values per theme
+    because the dark pair is unreadable on a light surface. The ratios below are against that
+    scheme's own background, and <code class="i">SemanticColorContrastTest</code> holds them to
+    4.5:1.
+  </p>
+  <p class="note">
+    <code class="i">FitFaceTextColors</code> supplies the two quiet tiers of text, and they are
+    the <strong>only</strong> way to dim text in this app — there is no alpha to choose at a
+    call site. <code class="i">secondary</code> is meta lines, subtitles and section headings;
+    <code class="i">tertiary</code> is the quietest line where three stack up, as in a project
+    row's name, source and age. Both clear 4.5:1 on every surface in both schemes, which
+    <code class="i">SmallTextContrastTest</code> holds. Disabled controls keep their own alphas
+    and are exempt — a control that cannot be operated should look inert.
+  </p>
+  <div class="scroller"><table>
+    <tr><th>Role</th><th>Dark</th><th></th><th>Light</th><th></th></tr>
+    <tr><td class="m">primary</td><td><span class="sw" style="background:#7FE3D2"></span></td><td class="m">#7FE3D2</td><td><span class="sw" style="background:#006B60"></span></td><td class="m">#006B60</td></tr>
+    <tr><td class="m">primaryContainer</td><td><span class="sw" style="background:#00504A"></span></td><td class="m">#00504A</td><td><span class="sw" style="background:#C0F3E9"></span></td><td class="m">#C0F3E9</td></tr>
+    <tr><td class="m">background / surface</td><td><span class="sw" style="background:#0A0E0E"></span></td><td class="m">#0A0E0E</td><td><span class="sw" style="background:#F7FAF9"></span></td><td class="m">#F7FAF9</td></tr>
+    <tr><td class="m">surfaceContainerLow</td><td><span class="sw" style="background:#101615"></span></td><td class="m">#101615</td><td><span class="sw" style="background:#F1F5F3"></span></td><td class="m">#F1F5F3</td></tr>
+    <tr><td class="m">surfaceContainer</td><td><span class="sw" style="background:#18201F"></span></td><td class="m">#18201F</td><td><span class="sw" style="background:#EAEFED"></span></td><td class="m">#EAEFED</td></tr>
+    <tr><td class="m">surfaceContainerHigh</td><td><span class="sw" style="background:#222B29"></span></td><td class="m">#222B29</td><td><span class="sw" style="background:#E1E8E5"></span></td><td class="m">#E1E8E5</td></tr>
+    <tr><td class="m">onSurface</td><td><span class="sw" style="background:#E6EDEA"></span></td><td class="m">#E6EDEA</td><td><span class="sw" style="background:#171D1B"></span></td><td class="m">#171D1B</td></tr>
+    <tr><td class="m">onSurfaceVariant</td><td><span class="sw" style="background:#99A5A1"></span></td><td class="m">#99A5A1</td><td><span class="sw" style="background:#4A5551"></span></td><td class="m">#4A5551</td></tr>
+    <tr><td class="m">outlineVariant</td><td><span class="sw" style="background:#2C3533"></span></td><td class="m">#2C3533</td><td><span class="sw" style="background:#C5CECB"></span></td><td class="m">#C5CECB</td></tr>
+    <tr><td class="m">error</td><td><span class="sw" style="background:#FFAF9F"></span></td><td class="m">#FFAF9F</td><td><span class="sw" style="background:#A73A2E"></span></td><td class="m">#A73A2E</td></tr>
+    <tr><td class="m"><strong>warning</strong> (semantic)</td><td><span class="sw" style="background:#F2C879"></span></td><td class="m">#F2C879 <span class="ratio pass">12.30:1</span></td><td><span class="sw" style="background:#775B16"></span></td><td class="m">#775B16 <span class="ratio pass">6.07:1</span></td></tr>
+    <tr><td class="m"><strong>experimental</strong> (semantic)</td><td><span class="sw" style="background:#C8B6FF"></span></td><td class="m">#C8B6FF <span class="ratio pass">10.71:1</span></td><td><span class="sw" style="background:#62558B"></span></td><td class="m">#62558B <span class="ratio pass">6.27:1</span></td></tr>
+    <tr><td class="m"><strong>text.secondary</strong></td><td><span class="sw" style="background:#99A5A1"></span></td><td class="m">onSurfaceVariant <span class="ratio pass">6.52:1</span></td><td><span class="sw" style="background:#4A5551"></span></td><td class="m">onSurfaceVariant <span class="ratio pass">6.67:1</span></td></tr>
+    <tr><td class="m"><strong>text.tertiary</strong></td><td><span class="sw" style="background:#8B9693"></span></td><td class="m">&times;&nbsp;.90 <span class="ratio pass">5.56:1</span></td><td><span class="sw" style="background:#5D6764"></span></td><td class="m">&times;&nbsp;.90 <span class="ratio pass">5.27:1</span></td></tr>
+  </table></div>
+  <p class="note" style="margin-bottom:6px">
+    What the dark pair measures if it leaks into the light theme, which is what happened when
+    the theme declared the composition local and never provided it:
+    <span class="ratio fail">amber 1.50:1</span> &middot;
+    <span class="ratio fail">violet 1.73:1</span>.
+  </p>
+</section>
+
+<section>
+  <h2 id="type">Type</h2>
+  <p class="note">
+    Mono is not decoration. <strong>In this app the numerals are the content</strong> — a
+    coordinate, a byte count, a sequence id — and a proportional digit changes width with its
+    value, so a figure being nudged jitters while you hold the button. Anything quantitative
+    goes in a mono slot. <code class="i">FitFaceType.readout</code> exists because Material's
+    ramp has no mono slot at 20sp, which is why the inspector's coordinates had fallen back to
+    a proportional <code class="i">headlineSmall</code>.
+  </p>
+  <div class="scroller"><table>
+    <tr><th>Token</th><th>Spec</th><th>Family</th><th>Sample</th></tr>
+    <tr><td class="m">headlineLarge</td><td class="m">28/32 · 600 · -0.3</td><td class="m">sans</td><td style="font:600 28px/32px var(--sans); letter-spacing:-.3px">Watch faces</td></tr>
+    <tr><td class="m">headlineSmall</td><td class="m">22/27 · 600</td><td class="m">sans</td><td style="font:600 22px/27px var(--sans)">Remove widget?</td></tr>
+    <tr><td class="m">titleLarge</td><td class="m">17/22 · 600</td><td class="m">sans</td><td style="font:600 17px/22px var(--sans)">Recent projects</td></tr>
+    <tr><td class="m">titleMedium</td><td class="m">15/20 · 600</td><td class="m">sans</td><td style="font:600 15px/20px var(--sans)">Black or white</td></tr>
+    <tr><td class="m">titleSmall</td><td class="m">13/18 · 600</td><td class="m">sans</td><td style="font:600 13px/18px var(--sans)">Widget #2</td></tr>
+    <tr><td class="m">bodyLarge</td><td class="m">14/20 · 400</td><td class="m">sans</td><td style="font:400 14px/20px var(--sans)">Each outlined region is a draggable widget.</td></tr>
+    <tr><td class="m">bodyMedium</td><td class="m">13/20 · 400</td><td class="m">sans</td><td style="font:400 13px/20px var(--sans)">Pick a face, edit it, then install it.</td></tr>
+    <tr><td class="m">bodySmall</td><td class="m">12/17 · 400</td><td class="m">sans</td><td style="font:400 12px/17px var(--sans)">Resetting restores the downloaded container.</td></tr>
+    <tr><td class="m">labelLarge</td><td class="m">13/18 · 600</td><td class="m">sans</td><td style="font:600 13px/18px var(--sans)">Review widget</td></tr>
+    <tr><td class="m">labelMedium</td><td class="m">11/16 · 500 · 0.3</td><td class="m"><strong>mono</strong></td><td style="font:500 11px/16px var(--mono); letter-spacing:.3px">Face 00112 · Style 1</td></tr>
+    <tr><td class="m">labelSmall</td><td class="m">10/14 · 600 · 1.2</td><td class="m"><strong>mono</strong></td><td style="font:600 10px/14px var(--mono); letter-spacing:1.2px">app=0.1.1 (17)</td></tr>
+    <tr><td class="m">FitFaceType.numeric</td><td class="m">12/16 · 500</td><td class="m"><strong>mono</strong></td><td style="font:500 12px/16px var(--mono)">x 77 · y 50 · 40×62</td></tr>
+    <tr><td class="m">FitFaceType.micro</td><td class="m">9.5/13 · 600 · 1.3</td><td class="m"><strong>mono</strong></td><td style="font:600 9.5px/13px var(--mono); letter-spacing:1.3px">VALIDATION · CHANGED BYTES</td></tr>
+    <tr><td class="m">FitFaceType.readout</td><td class="m">20/24 · 600</td><td class="m"><strong>mono</strong></td><td style="font:600 20px/24px var(--mono)">40 × 62 px</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2 id="shape">Shape, spacing, elevation</h2>
+  <p class="note">
+    <strong>There is no spacing token.</strong> A <code class="i">FitFaceSpacing</code> class
+    encoding a 4dp scale used to exist and nothing ever read it, while the UI modules hold
+    ~330 dp literals of which about two thirds are off that scale. It was deleted rather than
+    left to imply a rule the code does not follow — see <a href="#tokens-and-coverage">tokens and coverage</a>. The
+    values below are the ones actually in use; treat them as observed, not prescribed.
+  </p>
+  <div style="display:flex; gap:44px; flex-wrap:wrap; margin-bottom:22px">
+    <div>
+      <div class="ia-h">SHAPE — MaterialTheme.shapes</div>
+      <div style="display:flex; align-items:flex-end; gap:10px; margin-top:10px">
+        <div style="width:52px;height:36px;background:#18201f;border:1px solid rgba(255,255,255,.13);border-radius:4px"></div>
+        <div style="width:52px;height:36px;background:#18201f;border:1px solid rgba(255,255,255,.13);border-radius:8px"></div>
+        <div style="width:52px;height:36px;background:#18201f;border:1px solid rgba(255,255,255,.13);border-radius:10px"></div>
+        <div style="width:52px;height:36px;background:#18201f;border:1px solid rgba(255,255,255,.13);border-radius:14px"></div>
+        <div style="width:52px;height:36px;background:#18201f;border:1px solid rgba(255,255,255,.13);border-radius:18px"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:6px" class="m">
+        <span style="width:52px;text-align:center">xs 4</span>
+        <span style="width:52px;text-align:center">sm 8</span>
+        <span style="width:52px;text-align:center">md 10</span>
+        <span style="width:52px;text-align:center">lg 14</span>
+        <span style="width:52px;text-align:center">xl 18</span>
+      </div>
+      <p class="note" style="margin-top:10px;max-width:34ch">
+        <code class="i">extraSmall</code> is <code class="i">FitBadge</code>'s corner.
+        <code class="i">extraLarge</code> has no consumer, and a few places still hardcode
+        <code class="i">RoundedCornerShape</code> rather than reach for the token.
+      </p>
+    </div>
+    <div>
+      <div class="ia-h">SURFACE ELEVATION — lighter, not shadow</div>
+      <div style="display:flex; align-items:flex-end; gap:10px; margin-top:10px">
+        <div style="width:64px;height:36px;background:#0A0E0E;border:1px solid rgba(255,255,255,.07);border-radius:8px"></div>
+        <div style="width:64px;height:36px;background:#101615;border:1px solid rgba(255,255,255,.08);border-radius:8px"></div>
+        <div style="width:64px;height:36px;background:#18201F;border:1px solid rgba(255,255,255,.1);border-radius:8px"></div>
+        <div style="width:64px;height:36px;background:#222B29;border:1px solid rgba(255,255,255,.12);border-radius:8px"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:6px" class="m">
+        <span style="width:64px;text-align:center">base</span>
+        <span style="width:64px;text-align:center">low</span>
+        <span style="width:64px;text-align:center">container</span>
+        <span style="width:64px;text-align:center">high</span>
+      </div>
+      <p class="note" style="margin-top:10px;max-width:36ch">
+        A card is <code class="i">surfaceContainerLow</code> plus a 1dp
+        <code class="i">outlineVariant</code> border. There is no shadow anywhere in the app,
+        and <code class="i">FitFaceElevation</code> was deleted for having no consumers.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 id="components">Components</h2>
+  <p class="note">
+    Rendered against both schemes, because the semantic colours differ between them and that
+    is exactly where a regression hides. Use the toggle to compare.
+  </p>
+  <p class="note">
+    <strong>These are hand-built approximations, not a pixel-accurate render.</strong> The
+    panels are 360px wide to stand in for a 360dp phone, but they draw with whatever sans and
+    mono your browser resolves — Menlo or SF&nbsp;Mono on a Mac, which is materially wider
+    than the Roboto&nbsp;Mono the device uses. Tokens and component structure follow the code; illustrative labels do not replace
+    the app’s string resources, and <strong>text widths are not</strong>, so do not read a truncation or a fit off this
+    page. The measured device figures are in the width-budget table below, and
+    <code class="i">FitTopBarLayoutTest</code> is what actually holds the line.
+  </p>
+  <div class="toggle" role="group" aria-label="Which schemes to show">
+    <button type="button" data-show="both" aria-pressed="true">BOTH</button>
+    <button type="button" data-show="dark" aria-pressed="false">DARK</button>
+    <button type="button" data-show="light" aria-pressed="false">LIGHT</button>
+  </div>
+
+  <div class="panels">
+    <!-- The two panels are identical markup; only the scheme class differs. -->
+    <div class="panel scheme-dark" data-scheme="dark">
+      <div class="panel-tag">Dark</div>
+      <div class="panel-body">
+
+        <div class="caption">FitTopBar — the actions slot is a width budget</div>
+        <div class="top-bar bleed">
+          <div class="icon-btn">&lsaquo;</div>
+          <div class="bar-titles">
+            <div class="bar-title">Black or white</div>
+            <div class="bar-sub">Face 00112 · Style 1</div>
+          </div>
+          <span class="badge">EDITED</span>
+          <div class="icon-btn">⋯</div>
+          <div class="icon-btn">&#8801;</div>
+        </div>
+        <div class="caption">FitBadge — EDITED on Canvas; UNAPPLIED on Background, both in the top bar</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <span class="badge">EDITED</span>
+          <span class="badge">UNAPPLIED</span>
+        </div>
+
+        <div class="caption">FitDetails — reference facts; tap or use the keyboard to open</div>
+        <details class="fit-details">
+          <summary>CHECKS</summary>
+          <div class="details-body">Entry table bounds · Record sizes · Per-entry CRC · Payload length · Face ID byte range</div>
+        </details>
+
+        <div class="caption">FitHeading / FitInfo — tap the ⓘ (drawn, never the ℹ character); the bubble stays until dismissed</div>
+        <details class="fit-info">
+          <summary>SIZE <span class="info-glyph">i</span></summary>
+          <div class="bubble">The watch controls this text’s font size. Resizing its box would not resize the text.</div>
+        </details>
+
+        <div class="caption">FitIconButton — 38dp · default / warning-tinted</div>
+        <div style="display:flex; gap:10px">
+          <div class="icon-btn">&#8801;</div>
+          <div class="icon-btn warn">&#8801;</div>
+          <span class="badge">EDITED</span>
+          <div class="icon-btn">⋯</div>
+          <div class="icon-btn">&lsaquo;</div>
+        </div>
+
+        <div class="caption">FitButton — primary / loading / secondary / danger / experimental / disabled</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px">
+          <div class="fit-btn primary">Review widget</div>
+          <div class="fit-btn primary"><span class="spin"></span>Transferring</div>
+          <div class="fit-btn secondary">Export project</div>
+          <div class="fit-btn danger">Reset edits</div>
+          <div class="fit-btn experimental">Send to watch</div>
+          <div class="fit-btn disabled">Review widget</div>
+        </div>
+
+        <div class="caption">FitChip — 42dp · selected / default / disabled</div>
+        <div style="display:flex; gap:8px">
+          <div class="chip sel">Watch faces</div>
+          <div class="chip">Projects 1</div>
+          <div class="chip dis">ID ↑</div>
+        </div>
+
+        <div class="caption">StatusBanner — available states; no passing-check banner on Install</div>
+        <div class="banner pass"><div class="rule"></div><div class="lbl">OK</div><div class="msg">Request sent. Check the watch.</div></div>
+        <div class="banner warn"><div class="rule"></div><div class="lbl">WARN</div><div class="msg">This widget's frames have no transparency, so the watch paints its whole rectangle.</div></div>
+        <div class="banner fail"><div class="rule"></div><div class="lbl">FAIL</div><div class="msg">Record size 412 exceeds entry bound at offset 0x1A40.</div></div>
+
+        <div class="caption">WidgetRow — badges inline, meta on one line</div>
+        <div class="row">
+          <div class="thumb"></div>
+          <div class="mid">
+            <div class="name">Widget #2</div>
+            <div class="badges"><span class="micro type">Sprite</span><span class="micro warn">Opaque</span><span class="micro">10 frames</span></div>
+            <div class="meta">40×62 · x 77 y 50</div>
+          </div>
+          <div class="coords">77, 50</div>
+        </div>
+
+        <div class="caption">CoordinateControl — FitFaceType.readout</div>
+        <div class="readout-card">
+          <div class="readout-top"><span class="micro">X</span><span class="readout">77</span></div>
+          <div class="nudge-row"><div class="nudge">−</div><div class="nudge">+</div></div>
+        </div>
+
+        <div class="caption">EditorRail — five destinations</div>
+        <div class="rail bleed">
+          <div class="rail-item sel"><span class="rail-glyph">▣</span><span class="rail-label">Canvas</span></div>
+          <div class="rail-item"><span class="rail-glyph">▦</span><span class="rail-label">Widgets</span></div>
+          <div class="rail-item"><span class="rail-glyph">▧</span><span class="rail-label">Background</span></div>
+          <div class="rail-item"><span class="rail-glyph">◫</span><span class="rail-label">Styles</span></div>
+          <div class="rail-item"><span class="rail-glyph">⇧</span><span class="rail-label">Install</span></div>
+        </div>
+
+        <div class="caption">SelectionActionBar — stepped edits under the face</div>
+        <div class="peek bleed">
+          <div class="peek-top"><div class="peek-accent"></div><div>
+            <div class="peek-name">Hour digit</div>
+            <div class="peek-geo">#2 · 40×62 · x 77 y 50</div>
+          </div></div>
+          <div class="peek-nudges">
+            <div class="nudge compact" aria-label="Move left"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(0 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move up"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(90 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move down"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(270 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move right"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(180 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+          <div class="selection-actions">
+            <div class="icon-btn" aria-label="Smaller">−</div><div class="icon-btn" aria-label="Larger">+</div>
+            <div class="icon-btn" aria-label="Rotate left 15°">↺</div><div class="icon-btn" aria-label="Rotate right 15°">↻</div>
+            <div class="icon-btn" aria-label="Duplicate">⧉</div><div class="icon-btn" aria-label="Remove">✕</div>
+            <div class="icon-btn" aria-label="Edit widget">›</div>
+          </div>
+          <div class="micro" style="margin-top:8px">Tap to move · hold to keep moving</div>
+        </div>
+
+        <div class="caption">SectionHeading</div>
+        <div>
+          <div class="micro">On the canvas</div>
+          <div class="sect-detail">12 of 13 records draw a rectangle you can select and drag.</div>
+        </div>
+
+        <div class="caption">Search field</div>
+        <div class="search"><span>&#8981;</span><span class="q">Search faces or ID</span></div>
+
+        <div class="caption">Face card — default / not editable</div>
+        <div style="display:flex; gap:10px">
+          <div class="face-card">
+            <div class="face-shot"><span class="stub">256&times;402</span></div>
+            <div class="face-name">Black or white</div>
+            <div class="face-meta"><span class="face-id">#112</span><span class="face-styles">4 styles</span></div>
+          </div>
+          <div class="face-card">
+            <div class="face-shot"><span class="stub">256&times;402</span><span class="not-editable">Not editable</span></div>
+            <div class="face-name">Photos</div>
+            <div class="face-meta"><span class="face-id">#254</span><span class="face-styles">1 style</span></div>
+          </div>
+        </div>
+
+        <div class="caption">ProjectRow</div>
+        <div class="proj-row">
+          <div class="proj-thumb"></div>
+          <div class="proj-mid">
+            <div class="proj-name">Black or white</div>
+            <div class="proj-meta">Face 00112 &middot; Style 1</div>
+            <div class="proj-age">1 hr. ago</div>
+          </div>
+          <div class="icon-btn" aria-label="Project actions">⋯</div><span class="glyph-btn">&rsaquo;</span>
+        </div>
+
+
+        <div class="caption">ValidationCheck — pass / fail</div>
+        <div class="check"><span class="mark ok">&#10003;</span><span class="lbl">Per-entry CRC</span><span class="res">pass</span></div>
+        <div class="check"><span class="mark bad">&times;</span><span class="lbl">Record sizes</span><span class="res">fail</span></div>
+
+        <div class="caption">Install checklist step — done / pending</div>
+        <div>
+          <div class="step"><div class="step-dot done">&#10003;</div><div><div class="step-title">Connect the watch in its companion app</div><div class="step-sub">Companion app and plugin found</div></div></div>
+          <div class="step pending"><div class="step-dot">3</div><div><div class="step-title">Discover the watch-face and OTA peers</div><div class="step-sub">Needs the watch connected</div></div></div>
+        </div>
+
+        <div class="caption">Install checklist — steps 1 and 2 folded while both are done (▾ shows them; either coming undone brings its row back)</div>
+        <div>
+          <div class="step"><div class="step-dot done">&#10003;</div><div style="flex:1"><div class="step-title">Phone ready</div><div class="step-sub">Companion app and plugin found &middot; Nearby access granted</div></div><div class="step-sub">&#9662;</div></div>
+          <div class="step pending"><div class="step-dot">3</div><div><div class="step-title">Find the watch for transfer</div><div class="step-sub">Keep the plugin&rsquo;s Nearby devices access on.</div></div></div>
+        </div>
+
+        <div class="caption">Device badge — linked / setup / checking / missing</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <span class="dev-badge linked">Linked</span>
+          <span class="dev-badge setup">Setup</span>
+          <span class="dev-badge checking">Checking</span>
+          <span class="dev-badge missing">Missing</span>
+        </div>
+
+        <div class="caption">Empty state</div>
+        <div class="empty">
+          <div class="empty-plate">&#9671;</div>
+          <div class="empty-title">No projects yet</div>
+          <div class="empty-body">Pick a face from the catalogue to start one.</div>
+          <div class="fit-btn primary" style="width:100%">Browse watch faces</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="panel scheme-light" data-scheme="light">
+      <div class="panel-tag">Light</div>
+      <div class="panel-body">
+
+        <div class="caption">FitTopBar — the actions slot is a width budget</div>
+        <div class="top-bar bleed">
+          <div class="icon-btn">&lsaquo;</div>
+          <div class="bar-titles">
+            <div class="bar-title">Black or white</div>
+            <div class="bar-sub">Face 00112 · Style 1</div>
+          </div>
+          <span class="badge">EDITED</span>
+          <div class="icon-btn">⋯</div>
+          <div class="icon-btn">&#8801;</div>
+        </div>
+        <div class="caption">FitBadge — EDITED on Canvas; UNAPPLIED on Background, both in the top bar</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <span class="badge">EDITED</span>
+          <span class="badge">UNAPPLIED</span>
+        </div>
+
+        <div class="caption">FitDetails — reference facts; tap or use the keyboard to open</div>
+        <details class="fit-details">
+          <summary>CHECKS</summary>
+          <div class="details-body">Entry table bounds · Record sizes · Per-entry CRC · Payload length · Face ID byte range</div>
+        </details>
+
+        <div class="caption">FitHeading / FitInfo — tap the ⓘ (drawn, never the ℹ character); the bubble stays until dismissed</div>
+        <details class="fit-info">
+          <summary>SIZE <span class="info-glyph">i</span></summary>
+          <div class="bubble">The watch controls this text’s font size. Resizing its box would not resize the text.</div>
+        </details>
+
+        <div class="caption">FitIconButton — 38dp · default / warning-tinted</div>
+        <div style="display:flex; gap:10px">
+          <div class="icon-btn">&#8801;</div>
+          <div class="icon-btn warn">&#8801;</div>
+          <span class="badge">EDITED</span>
+          <div class="icon-btn">⋯</div>
+          <div class="icon-btn">&lsaquo;</div>
+        </div>
+
+        <div class="caption">FitButton — primary / loading / secondary / danger / experimental / disabled</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px">
+          <div class="fit-btn primary">Review widget</div>
+          <div class="fit-btn primary"><span class="spin"></span>Transferring</div>
+          <div class="fit-btn secondary">Export project</div>
+          <div class="fit-btn danger">Reset edits</div>
+          <div class="fit-btn experimental">Send to watch</div>
+          <div class="fit-btn disabled">Review widget</div>
+        </div>
+
+        <div class="caption">FitChip — 42dp · selected / default / disabled</div>
+        <div style="display:flex; gap:8px">
+          <div class="chip sel">Watch faces</div>
+          <div class="chip">Projects 1</div>
+          <div class="chip dis">ID ↑</div>
+        </div>
+
+        <div class="caption">StatusBanner — available states; no passing-check banner on Install</div>
+        <div class="banner pass"><div class="rule"></div><div class="lbl">OK</div><div class="msg">Request sent. Check the watch.</div></div>
+        <div class="banner warn"><div class="rule"></div><div class="lbl">WARN</div><div class="msg">This widget's frames have no transparency, so the watch paints its whole rectangle.</div></div>
+        <div class="banner fail"><div class="rule"></div><div class="lbl">FAIL</div><div class="msg">Record size 412 exceeds entry bound at offset 0x1A40.</div></div>
+
+        <div class="caption">WidgetRow — badges inline, meta on one line</div>
+        <div class="row">
+          <div class="thumb"></div>
+          <div class="mid">
+            <div class="name">Widget #2</div>
+            <div class="badges"><span class="micro type">Sprite</span><span class="micro warn">Opaque</span><span class="micro">10 frames</span></div>
+            <div class="meta">40×62 · x 77 y 50</div>
+          </div>
+          <div class="coords">77, 50</div>
+        </div>
+
+        <div class="caption">CoordinateControl — FitFaceType.readout</div>
+        <div class="readout-card">
+          <div class="readout-top"><span class="micro">X</span><span class="readout">77</span></div>
+          <div class="nudge-row"><div class="nudge">−</div><div class="nudge">+</div></div>
+        </div>
+
+        <div class="caption">EditorRail — five destinations</div>
+        <div class="rail bleed">
+          <div class="rail-item sel"><span class="rail-glyph">▣</span><span class="rail-label">Canvas</span></div>
+          <div class="rail-item"><span class="rail-glyph">▦</span><span class="rail-label">Widgets</span></div>
+          <div class="rail-item"><span class="rail-glyph">▧</span><span class="rail-label">Background</span></div>
+          <div class="rail-item"><span class="rail-glyph">◫</span><span class="rail-label">Styles</span></div>
+          <div class="rail-item"><span class="rail-glyph">⇧</span><span class="rail-label">Install</span></div>
+        </div>
+
+        <div class="caption">SelectionActionBar — stepped edits under the face</div>
+        <div class="peek bleed">
+          <div class="peek-top"><div class="peek-accent"></div><div>
+            <div class="peek-name">Hour digit</div>
+            <div class="peek-geo">#2 · 40×62 · x 77 y 50</div>
+          </div></div>
+          <div class="peek-nudges">
+            <div class="nudge compact" aria-label="Move left"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(0 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move up"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(90 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move down"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(270 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="nudge compact" aria-label="Move right"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(180 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          </div>
+          <div class="selection-actions">
+            <div class="icon-btn" aria-label="Smaller">−</div><div class="icon-btn" aria-label="Larger">+</div>
+            <div class="icon-btn" aria-label="Rotate left 15°">↺</div><div class="icon-btn" aria-label="Rotate right 15°">↻</div>
+            <div class="icon-btn" aria-label="Duplicate">⧉</div><div class="icon-btn" aria-label="Remove">✕</div>
+            <div class="icon-btn" aria-label="Edit widget">›</div>
+          </div>
+          <div class="micro" style="margin-top:8px">Tap to move · hold to keep moving</div>
+        </div>
+
+        <div class="caption">SectionHeading</div>
+        <div>
+          <div class="micro">On the canvas</div>
+          <div class="sect-detail">12 of 13 records draw a rectangle you can select and drag.</div>
+        </div>
+
+        <div class="caption">Search field</div>
+        <div class="search"><span>&#8981;</span><span class="q">Search faces or ID</span></div>
+
+        <div class="caption">Face card — default / not editable</div>
+        <div style="display:flex; gap:10px">
+          <div class="face-card">
+            <div class="face-shot"><span class="stub">256&times;402</span></div>
+            <div class="face-name">Black or white</div>
+            <div class="face-meta"><span class="face-id">#112</span><span class="face-styles">4 styles</span></div>
+          </div>
+          <div class="face-card">
+            <div class="face-shot"><span class="stub">256&times;402</span><span class="not-editable">Not editable</span></div>
+            <div class="face-name">Photos</div>
+            <div class="face-meta"><span class="face-id">#254</span><span class="face-styles">1 style</span></div>
+          </div>
+        </div>
+
+        <div class="caption">ProjectRow</div>
+        <div class="proj-row">
+          <div class="proj-thumb"></div>
+          <div class="proj-mid">
+            <div class="proj-name">Black or white</div>
+            <div class="proj-meta">Face 00112 &middot; Style 1</div>
+            <div class="proj-age">1 hr. ago</div>
+          </div>
+          <div class="icon-btn" aria-label="Project actions">⋯</div><span class="glyph-btn">&rsaquo;</span>
+        </div>
+
+
+        <div class="caption">ValidationCheck — pass / fail</div>
+        <div class="check"><span class="mark ok">&#10003;</span><span class="lbl">Per-entry CRC</span><span class="res">pass</span></div>
+        <div class="check"><span class="mark bad">&times;</span><span class="lbl">Record sizes</span><span class="res">fail</span></div>
+
+        <div class="caption">Install checklist step — done / pending</div>
+        <div>
+          <div class="step"><div class="step-dot done">&#10003;</div><div><div class="step-title">Connect the watch in its companion app</div><div class="step-sub">Companion app and plugin found</div></div></div>
+          <div class="step pending"><div class="step-dot">3</div><div><div class="step-title">Discover the watch-face and OTA peers</div><div class="step-sub">Needs the watch connected</div></div></div>
+        </div>
+
+        <div class="caption">Install checklist — steps 1 and 2 folded while both are done (▾ shows them; either coming undone brings its row back)</div>
+        <div>
+          <div class="step"><div class="step-dot done">&#10003;</div><div style="flex:1"><div class="step-title">Phone ready</div><div class="step-sub">Companion app and plugin found &middot; Nearby access granted</div></div><div class="step-sub">&#9662;</div></div>
+          <div class="step pending"><div class="step-dot">3</div><div><div class="step-title">Find the watch for transfer</div><div class="step-sub">Keep the plugin&rsquo;s Nearby devices access on.</div></div></div>
+        </div>
+
+        <div class="caption">Device badge — linked / setup / checking / missing</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <span class="dev-badge linked">Linked</span>
+          <span class="dev-badge setup">Setup</span>
+          <span class="dev-badge checking">Checking</span>
+          <span class="dev-badge missing">Missing</span>
+        </div>
+
+        <div class="caption">Empty state</div>
+        <div class="empty">
+          <div class="empty-plate">&#9671;</div>
+          <div class="empty-title">No projects yet</div>
+          <div class="empty-body">Pick a face from the catalogue to start one.</div>
+          <div class="fit-btn primary" style="width:100%">Browse watch faces</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 id="glyphs">Glyphs</h2>
+  <p class="note">
+    There is <strong>no icon library in this project</strong> and no vector drawable outside
+    the launcher. Most symbols are text glyphs; nudge arrows and colour swatches are drawn. Resource
+    headers record the inline glyph choice as deliberate: they are symbols, not copy, so they stay inline in the
+    Composables where a translator will not see them. <strong>A glyph-only control needs a
+    <code class="i">contentDescription</code></strong> — without one a screen reader announces
+    the character, which is how the overflow button used to introduce itself as "midline
+    horizontal ellipsis".
+  </p>
+  <div class="glyphs">
+    <div class="glyph-cell"><div class="g">&lsaquo;</div><div class="n">back</div></div>
+    <div class="glyph-cell"><div class="g">&rsaquo;</div><div class="n">forward</div></div>
+    <div class="glyph-cell"><div class="g">&#8943;</div><div class="n">overflow</div></div>
+    <div class="glyph-cell"><div class="g">&#8801;</div><div class="n">app menu</div></div>
+    <div class="glyph-cell"><div class="g">&#8981;</div><div class="n">search</div></div>
+    <div class="glyph-cell"><div class="g">&times;</div><div class="n">remove</div></div>
+    <div class="glyph-cell"><div class="g">&#9671;</div><div class="n">empty</div></div>
+    <div class="glyph-cell"><div class="g">&#10003;</div><div class="n">pass / done</div></div>
+    <div class="glyph-cell"><div class="g">▣</div><div class="n">canvas</div></div>
+    <div class="glyph-cell"><div class="g">&#9638;</div><div class="n">widgets</div></div>
+    <div class="glyph-cell"><div class="g">&#9639;</div><div class="n">background</div></div>
+    <div class="glyph-cell"><div class="g">&#9707;</div><div class="n">styles</div></div>
+    <div class="glyph-cell"><div class="g">&#8679;</div><div class="n">install</div></div>
+    <div class="glyph-cell"><div class="g">&#9679;</div><div class="n">selected</div></div>
+    <div class="glyph-cell"><div class="g"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(0 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="n">nudge left</div></div>
+    <div class="glyph-cell"><div class="g"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(90 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="n">nudge up</div></div>
+    <div class="glyph-cell"><div class="g"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(270 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="n">nudge down</div></div>
+    <div class="glyph-cell"><div class="g"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M14 9H4M8 5L4 9L8 13" transform="rotate(180 9 9)" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div class="n">nudge right</div></div>
+    <div class="glyph-cell"><div class="g">&minus;</div><div class="n">decrement</div></div>
+    <div class="glyph-cell"><div class="g">+</div><div class="n">increment</div></div>
+  </div>
+  <p class="note" style="margin-top:20px">
+    Avoid <code class="i">&#9888;</code> and <code class="i">&#9873;</code> and anything else
+    with an emoji presentation: several devices render them as a colour emoji, which breaks a
+    monochrome set badly. Check new glyphs on Android before using them; browser rendering does not establish
+    fallback-font behaviour on a phone.
+  </p>
+</section>
+
+<section>
+  <h2 id="header-budget">The top bar's width budget</h2>
+  <p class="note">
+    The header width contract is checked by layout tests.
+    <code class="i">FitTopBar</code> gives its title/subtitle column a
+    <code class="i">weight(1f)</code>, so the column is the flexible child and
+    <strong>every dp an action takes comes out of the title</strong>. A full-label
+    "Report a problem" <code class="i">TextButton</code> took 109dp of a 360dp bar — wider
+    than the title beside it — and the subtitle was silently ellipsized on every editor page,
+    with no exception, no lint warning and nothing in any test.
+  </p>
+  <p class="note">
+    This is also why the app's three global actions — report a problem, about, check for
+    update — are one <code class="i">≡</code> button and a menu rather than three buttons.
+    There are two menus now — this one and a project row's — and they share
+    <code class="i">FitDropdownMenu</code> and <code class="i">FitMenuEntry</code>, because
+    assembled separately the second took Material's default entry type against this one's
+    <code class="i">bodyMedium</code>.
+    A <code class="i">DropdownMenu</code> is a <code class="i">Popup</code>, measured in its
+    own window, so the bar pays for the anchor and nothing else: the numbers below are the
+    same as they were for the single button it replaced.
+    <code class="i">FitTopBarLayoutTest.theOpenMenuCostsTheBarNoWidth</code> is what keeps
+    that true.
+  </p>
+  <div class="scroller"><table>
+    <tr><th>Bar at 360dp</th><th>dp</th><th>Note</th></tr>
+    <tr><td class="m">horizontal padding</td><td class="m">16 + 16</td><td class="m">fixed</td></tr>
+    <tr><td class="m">back button</td><td class="m">38</td><td class="m">FitIconButton</td></tr>
+    <tr><td class="m">gaps</td><td class="m">12 each</td><td class="m">Arrangement.spacedBy</td></tr>
+    <tr><td class="m">each action</td><td class="m">38</td><td class="m">≤ 44 is the tested budget</td></tr>
+    <tr><td class="m"><strong>title column, one action</strong></td><td class="m"><strong>228</strong></td><td class="m">floor asserted at 200</td></tr>
+    <tr><td class="m"><strong>title column, Canvas worst case</strong></td><td class="m"><strong>label-dependent</strong></td><td class="m">EDITED + ⋯ + ≡ · title-to-badge span has a tested floor of 110</td></tr>
+  </table></div>
+  <p class="note">
+    Two rules follow, and both have been broken here before. <strong>An action is a
+    <code class="i">FitIconButton</code></strong> and its label lives in the
+    <code class="i">contentDescription</code>. <strong>The always-present action is emitted
+    last</strong>, so as the final child its right edge pins to the padding and it stops
+    sliding sideways when a conditional neighbour appears — the library's moved 189px on a tab
+    switch. <code class="i">FitTopBarLayoutTest</code> pins the budget; it asserts geometry
+    rather than whether text was ellipsized, because Robolectric's font metrics are not the
+    device's and a truncation assertion passes while a real phone still clips.
+  </p>
+</section>
+
+<section>
+  <h2 id="screens">Screens</h2>
+  <p class="note">
+    <strong>A page</strong> is a distinct task with its own state and its own way out, and
+    earns a back-stack entry. <strong>A peek or sheet</strong> needs the canvas visible while
+    you use it, or resolves in one tap — a 1px nudge needs the face in the same eyeful, so
+    nudging is never a page. Five rail destinations means one back stack and no nested graphs.
+  </p>
+  <div class="ia">
+    <div class="ia-col">
+      <div class="ia-h">L0 · ROOT</div>
+      <div class="ia-page">Library<span>Watch faces / Projects</span></div>
+      <div class="ia-peek">Face sheet<span>SHEET · your projects, styles, download</span></div>
+      <div class="ia-peek">App menu<span>MENU · both top bars · &#8801;</span></div>
+      <div class="ia-peek">Project overflow<span>MENU · a project row · &#8943;</span></div>
+      <div class="ia-peek">Rename project<span>DIALOG · from either &#8943;</span></div>
+      <div class="ia-peek">Delete project<span>DIALOG · from either &#8943;</span></div>
+      <div class="ia-peek">Diagnostics<span>DIALOG · from the menu</span></div>
+      <div class="ia-peek">About<span>DIALOG · from the menu</span></div>
+      <div class="ia-peek">App update<span>DIALOG · check, download, install</span></div>
+    </div>
+    <div class="ia-arm"><div></div></div>
+    <div class="ia-col">
+      <div class="ia-h">L1 · EDITOR HOME</div>
+      <div class="ia-page">Canvas<span>preview · drag · nudge</span></div>
+      <div class="ia-peek">Selection actions<span>nudge · resize · rotate · duplicate · remove · edit</span></div>
+    </div>
+    <div class="ia-arm"><div></div></div>
+    <div class="ia-col" style="min-width:210px">
+      <div class="ia-h">L2 · RAIL DESTINATIONS</div>
+      <div class="ia-page">Widgets<span>picker → Canvas · sets stay in list</span></div>
+      <div class="ia-page">Background<span>fit · zoom · apply</span></div>
+      <div class="ia-page">Styles<span>variants as pictures</span></div>
+      <div class="ia-page">Install<span>preview, checks, setup and transfer</span></div>
+      <div class="ia-peek">Project<span>PAGE · off &#8943; · rename, duplicate, reset, delete</span></div>
+    </div>
+  </div>
+  <p class="note" style="margin-top:20px">
+    <strong>Install combines the preview, checks, four-step setup and transfer.</strong>
+    Validation gates sending; every edit also clears the reviewed-preview flag.
+    Optional protocol details expand below the transfer controls. Warnings and recovery
+    instructions remain visible, and completion says Request sent rather than claiming
+    the watch installed the face.
+  </p>
+</section>
+
+<section id="implementation-rules" class="rules">
+  <h2>Implementation rules</h2>
+  <p class="note">Current behaviour and constraints for contributors. Update this page with the Kotlin components; task audits and screenshots stay in ignored <code>analysis/reviews/</code>. <a href="../AGENTS.md">AGENTS</a> is the working brief; <a href="architecture.md#the-preview-pipeline">Architecture</a> owns rendering and <a href="bin-format.md#editing-contracts">the format reference</a> owns edit safety.</p>
+
+  <h3 id="copy-and-status">Copy and visible status</h3>
+  <ul>
+    <li>Keep visible: action meaning, values, state, edit scope (once per screen), refusals and size limits that block an action, shared-artwork consequences, warnings, errors and recovery. Behind an ⓘ: how a control works, why it is disabled, preview caveats and record/protocol facts. Use plain names.</li>
+    <li>Canvas shows <strong>EDITED</strong> in its header whenever <code>snapshot.isDirty</code>, alongside Project <code>⋯</code> and app menu <code>≡</code>. Include edited status in the title's accessibility description. Background shows <strong>UNAPPLIED</strong> while an image is pending.</li>
+    <li>The screen states; the ⓘ explains. <code>FitInfo</code> is a drawn ⓘ sized to the text it follows (12dp beside body text and in buttons, 10dp after a <code>MicroLabel</code>, 9dp in a tag; Compose widens its touch area to 48dp) labelled “About ‹topic›”. <code>FitHeading</code> is a <code>MicroLabel</code> with one, <code>FitTag</code> a badge that is its own trigger (a widget's kind, NO OUTLINE, BACKGROUND, OPAQUE, SAMPLE PREVIEW), <code>FitInfoLink</code> a text trigger for a question (“Face not changing?”), and <code>FitButton(info =)</code> puts it inside a button after the label, never beside the button. The bubble is a focusable popup anchored to its trigger: above when it fits, otherwise below; closed by an outside tap, back or the trigger, never by a timer; one open at a time. A key closes it when its subject changes. Shared controls (Position, Size, Fit, Colour) carry the same ⓘ on every page.</li>
+    <li><code>FitDetails</code> is for reference facts someone opens on purpose: the project's file details, Install's Checks and Audit, and Transfer details. It is a 48dp-minimum full-header button with action label, announced expanded state and restored state. Put long expanded content in the page/sheet scroll region so pinned actions stay reachable. Explanations do not go in drop-downs.</li>
+    <li>Gestures nothing on screen can show (hold to select several, hold to compare, pinch, drag on the face) keep a visible line through <code>rememberLearnedHint</code> until done once on the device, then that line goes. The drag line leaves a blank of the same height so the face does not resize.</li>
+    <li>Use <code>styleLabel</code> from the parsed style number plus one, not a list index. Use <code>variantLabel</code> for AOD everywhere, including accessibility; raw sampler IDs remain protocol data.</li>
+    <li>A custom row <code>contentDescription</code> must include its identity and visible status, including OUTDATED. Edit widget names a widget's kind and properties as tags (kind, NO OUTLINE/BACKGROUND, OPAQUE, COPY OF #N); the kind's bubble holds the record, and a no-outline widget's support message is in its own tag, not repeated there.</li>
+    <li>Persistent failures have persistent state (<code>catalogFailure</code>); a sheet shows <code>sheetError</code> because it covers the snackbar. Await <code>showSnackbar</code>, then clear in <code>finally</code>: clearing the effect's key first cancels the message.</li>
+  </ul>
+
+  <h3 id="headers-and-menus">Headers, menus and dialogs</h3>
+  <ul>
+    <li>Top-bar actions are 38dp icon buttons with accessible labels. Keep the title column flexible and the always-present app menu last. Do not align a single action against the centre of a two-line title column. <code>FitTopBarLayoutTest</code> measures width and anchoring, not device truncation.</li>
+    <li><code>FitDropdownMenu</code>/<code>FitMenuEntry</code> share typography across app and project menus. Popup contents cost no bar width. Close before callbacks; destructive entries use error colour and go last. <code>≡</code> means app actions; <code>⋯</code> means project actions (row menu or Canvas → Project). They intentionally coexist on Canvas.</li>
+    <li>Use rendered glyph samples on Android before adding symbols. <code>⚙</code>/<code>ℹ</code> can become emoji, <code>❐</code> lost its duplicate shape and <code>␡</code> rendered tiny letters. Rotate is <code>↺</code> <code>↻</code>, checked on the Android 16 emulator; nudge arrows are drawn paths, not font arrows with mismatched baselines.</li>
+    <li>Library tabs share one header/inset component. Measure the taller subtitle, retain the hidden one with alpha zero and cleared semantics, and keep the action floor at 48dp. Import uses Refresh's slot on Projects; Export sits in each project's ⋯ menu between Duplicate and Delete. Crash tint and “Report crash” change wording/colour only, never geometry. <code>LibraryHeaderLayoutTest</code> covers both tabs and the crash state.</li>
+    <li>Until the saved projects have been read once (<code>projectsLoaded</code>), the Projects tab names no count and its page shows a loading row: “Projects 0” over “No projects yet” tells someone with saved work it is gone. An empty first read is still a read, and then shows the empty state.</li>
+    <li>Dialog text slots scroll once at the outer slot; nested scrolling still clips text above it. About stays short enough for landscape, with a one-sentence independent/non-affiliated statement, labelled version and project link. <code>AboutCopyTest</code> pins meaning/length; <code>LinkAnnotation.Url</code> uses the URI handler without a UI-layer Context/Intent.</li>
+  </ul>
+
+  <h3 id="canvas-interaction">Canvas and selection</h3>
+  <ul>
+    <li>Five rail destinations: Canvas, Widgets, Background, Styles, Install. Back leaves the editor; Canvas is a destination, not a hidden mode. Widgets is a picker: a single selection goes to Canvas, a set stays in the list. Inspector is Edit widget, reached by the tray's <code>›</code>. Navigate out of Inspector after a removal-count change, not merely a cleared selection.</li>
+    <li><code>SelectionActionBar</code> has four drawn nudge arrows and seven actions: smaller, larger, rotate left, rotate right, duplicate, remove, Edit widget. Nothing sits beside its title; the set tray's only header action is Clear. Both rows fill width. Apply the icon button's size before the caller modifier so weight controls width while height stays 38dp; don't repeat the header's dimensions in the tray. Compact buttons serve this tray.</li>
+    <li>A single selection's tray is paged (<code>QuickPanelPager</code>): <code>SelectionActionBar</code> opens first; swiping right reaches Colour (<code>QuickColourPage</code>) and swiping left reaches Layers (<code>QuickLayersPage</code>). Every page is at least the action bar's height, so the face does not move on a swipe. Page dots in the title row's right corner are the tap and screen-reader route, announced with the page's name and position; titles reserve their width. The set tray is not paged.</li>
+    <li>The Layers page's first row is the four ways to add to the face, in the Widgets page's order, as compact text buttons laid out exactly as the nudge arrows are (no height of their own: forced to 38dp they lost the touch-target room the arrows keep and sat above them), each its full name in <code>labelMedium</code> at 9.5sp (12sp lines; <code>labelSmall</code>'s tracking made it no narrower) on two short centred lines: Import widget, Add image, Add text and Clock font, read out in full (Add widgets from another face; Add an image, GIF or video). Clock font is disabled, not hidden, when the selected style draws no clock from pictures. Its second row keeps the action bar's seven columns, one <code>FitIconButton</code> per column: <code>ALL</code> (the all-styles switch, drawn <b>on</b> when set, disabled on AOD, added widgets and one-style faces), the four layer moves (front-most first, drawn arrows, barred for front and back) with the middle column empty between the two forward and the two back, and <code>›</code>. The facts line gives the layer position and that order changes the selected style only; the hint says which styles edits reach, or why that is fixed. A picture, text or clock font started here is chosen on the Widgets page, which the editor opens when it starts. Leaving that page keeps the choice until Discard or Add/Apply, as a pending background is kept. One choice is open there at a time: each button (and Edit widget's Draw in another font / Draw the clock in another font) reopens its own kind as it was left, or starts a new one that replaces a different kind left unfinished. The screen goes to Widgets on <code>widgetsChoicesStarted</code> changing, a count of starts, never on "something is pending" becoming true, which missed every start after the first.</li>
+    <li>Every tray page — the action bar, the set tray, Colour, Layers and Colour's slider pop-up — is built on one frame: <code>TrayPadding</code>, <code>TrayTitle</code>, <code>TrayFirstRowTop</code>/<code>TrayFirstRowGap</code>, <code>TraySecondRowTop</code>/<code>TraySecondRowGap</code>, <code>TrayHintTop</code> and <code>TrayButtonHeight</code>. A text button in a second row is held to <code>TrayButtonHeight</code>: at a text button's own 48dp it made its page, and so the pager, taller, and the face jumped on every swipe. Second-row slots are <code>FitIconButton</code>s (glyph or drawn content, with its <b>on</b> look for the current choice) sharing the row by weight. Change a tray's spacing there, never on one page. The Colour page keeps the action bar's frame row for row: title, facts (colour and scope), a hex row, a preset row and the hint, so its <code>›</code> is the last slot of the second row exactly where the action bar has it. The hex row sits on the first row's four-column grid — the field over two columns, then Apply, then the sliders button — so its edges fall where the nudge arrows' do. It is a 38dp field with the colour's swatch, Apply (enabled for a valid code that changes the colour; Done applies too) and a drawn sliders button. That button opens Edit widget's <code>ColorSliders</code> in a pop-up placed exactly over the panel at its size (40dp slider rows so all three fit), with the colour and ✕ on top; the face stays in full view. The preset row is Original colours, the five presets and <code>›</code>. Sliders save on release; the field follows the drag. The field's swatch previews a valid typed code; any choice closes the keyboard, and the field follows the saved colour (undo, reset) unless a code is half typed. Everything chosen while the page stays open for one widget is one undo step, and a choice made during a save is queued, latest first, for the same widget only. Widgets without a settable colour show the page disabled with the reason; <code>›</code> still works.</li>
+    <li>Edit widget holds what is set rather than stepped. Its order is position, size, rotation, colour, layer order, the record's facts, then the scope switch directly above duplicate/remove, as before 0.2.0; rotation and colour repeat the scope in their own “Applies to” line. Scope defaults to selected style; AOD, imported widgets and single-style faces explain why it is fixed instead of offering a switch. Tray edits follow the same scope, which <code>CanvasHint</code> states above the single tray and a label states in the set tray.</li>
+    <li><code>RepeatingNudgeButton</code> steps a tap from its click only and a hold from its own timer only (420 ms, then faster), which the click stops; a hold's release adds nothing. Stepping on the press as well, with the click as a fallback, moved 2 px for one tap on a slow phone, where the press is seen after its click. <code>NudgeRepeater</code> is tested in every order of press, click, release and cancel; an accessibility click has no press and is one step. <code>EditorViewModelTest</code> checks queued movement. Queue from pending/in-flight targets, never a stale snapshot; coalesce to the latest target. Restoring position must cancel outstanding movement.</li>
+    <li>Undo <code>↶</code> and redo <code>↷</code> flank <code>CanvasHint</code>, under the face, not in the header: on a narrow phone the header's project name, EDITED, <code>⋯</code> and <code>≡</code> leave no room for two more 38dp buttons. They are disabled with nothing to do, named for the step in accessibility text ("Undo move"), and each undo or redo shows a snackbar ("Undid move") taken from the result, not the request. One press of a nudge arrow is one step however long it is held, as is a set action or an import batch. A press on a set while the last one's members are still committing joins its step, so an undo never leaves a set apart. The selection survives an undo only where the same widget is still at its index.</li>
+    <li>Keep gesture inputs current with <code>rememberUpdatedState</code>; do not restart <code>pointerInput</code> on every snapshot. <code>stepDragAxis</code> accumulates unclamped finger travel and clamps only output, so returning from an edge stays under the finger.</li>
+    <li>Drag, nudge, set nudge and typed position share one clamp, <code>constrainDragCoordinate</code> with <code>offFaceKeepVisible</code>: a widget may hang past an edge while a tenth of its drawn outline per axis (at least 10 px, at most all of it) stays on the face, so it can always be tapped again. A starting position already further out is admitted and can be walked back in. The selected widget gets a bar along each face edge it crosses, and <code>CanvasHint</code> says the watch cuts off the part outside the face. That line is kept, blank, whenever one canvas widget is selected: the face is sized to the space left, so showing it only when needed resized the face each time a widget crossed an edge. A drag is hit-tested where the finger went down, not where the touch slop was passed, or a drag starting on a 10 px slice leaves it before the test runs. Position in Edit widget adds left/top fields, which take the readouts' numbers and show the allowed range, refusing a number beyond it rather than clamping it. Applying one is a nudge by the difference from the queued target.</li>
+    <li>Arrange layers lives in Edit widget as one row of four tiles, front-most first: a drawn arrow (barred up, up, down, barred down) over a short word (Front, Forward, Backward, Back). Each tile announces its full name, Bring to front, Bring forward, Send backward or Send to back, with selected-variant-only scope beside the heading. The tiles go two to a row when the widest word does not fit four across (<code>arrangeTilesPerRow</code>), never a squeezed or wrapped word. Disable actions at boundaries and explain fixed full-face backgrounds. Refused alignment changes use the persistent editor error. Selection follows the moved widget.</li>
+    <li>Colour is offered for text (Value and Composite), lines and vector arcs, which store one; pictures have none. Edit widget shows current and original colour and the scope above the shared <code>ColourPicker</code> (see <a href="#shared-controls">Shared editing controls</a>) in its committing mode: Original colours and the presets commit when tapped, the hex field and sliders only on Apply, since every commit rewrites and validates the container. Original colours returns each style in scope to its own original. Keep the 16-bit watch-colour note visible.</li>
+  </ul>
+
+  <h3 id="shared-controls">Shared editing controls</h3>
+  <ul>
+    <li>Position, size and colour are one control each, on every page that has them: Edit widget, the Background page's placing, a moving background, a picture or moving picture, and the Photos page. Each says what differs per page with a mode or a slot, never with a second copy.</li>
+    <li>Every major control sits in one <code>ControlCard</code> (filled <code>surfaceContainerLow</code>, outlined, 14dp padding): position, size, rotation, colour, arrangement, fit (<code>FitControls</code>), Applies to, Frames kept and Part of the video. Inside a card, a sub-box is outlined only, never filled again.</li>
+    <li><strong>Position</strong> (<code>PositionControls</code>): X and Y in outlined boxes, each with its arrows (<code>RepeatingNudgeButton</code>, tap 1 px, hold to repeat and speed up) and its number, then left and top typed with their allowed range and Apply position. A widget's numbers are its drawn edges, clamped by <code>placeableRange</code>; an image's are its drawn rectangle's (<code>imageEdges</code>, within the pinch's ±2 panels), a picture's its rung's rectangle (<code>pictureEdges</code>, kept on the face like a drag). On a placing page a move is handed over as the pan a drag would make.</li>
+    <li><strong>Size</strong> (<code>SizeControls</code>): a card with the size now, a line about it, and − / + that step once a tap and repeat while held. Edit widget steps the resize ladder, each step a commit (and an undo step); a placing page steps the zoom (2%) or a picture's ladder (5%), and adds the tap/hold/pinch hint and Reset placement.</li>
+    <li><strong>Colour</strong> (<code>ColourPicker</code>): a card with Original colours, the five presets, a swatch beside <code>#RRGGBB</code>, and the hue, saturation and brightness rows. Committing on Edit widget (above); previewing on the placing pages, where every choice, sliders included, is drawn on the face at once and saved by Use or Add.</li>
+    <li>Rotation is the tray's <code>↺</code> <code>↻</code> (15° per tap) and, in Edit widget, the same buttons plus current/original angles, scope, an exact angle and Reset rotation, all on the page. Text, lines, vector arcs and pictures turn; all but text take whole degrees. A turned picture is redrawn and grows, so Edit widget says so, says an opaque picture's black box turns with it, and says before the tap how many other widgets share its artwork. Disable the buttons rather than hide them for other types, and give the reason in Edit widget: a gauge has no angle, a hand's angle is its reading, a background is replaced instead. Keep the approximate-font limitation visible for text; turned text stays transparent behind its glyphs.</li>
+    <li>The first hold enters selection mode, including on the already-selected widget. Repeated holds keep an item selected; taps toggle membership. A singleton stays in selection mode with the set tray; Clear, bare canvas or removing the final pick exits. There is no Done: a plain tap then selects one widget for ordinary editing. Widget rows' <code>+</code> is the labelled tap alternative to holding. Widgets stays open while selecting, including one item; Edit on canvas opens the set controls. Set drag is disabled, including for one item. Nudge by the most constrained member's shared step. Duplicate/remove use single-widget calls, stop at first refusal and report committed results; remove highest index first.</li>
+    <li>Publish all visual set targets together in <code>pendingSetMove</code>; <code>setMoveSegments</code> preserves intervening z-order while individual commits finish. Keep the tray's height stable and unsupported set actions disabled.</li>
+  </ul>
+
+  <h3 id="adaptive-layout">Window size and scrolling</h3>
+  <ul>
+    <li>Fit the face to both available width and height; use split layouts in short windows. Rail labels have no tracking, and the vertical rail scrolls with tighter spacing. Weighted equal-height slots clip labels rather than solve overflow. <code>EditorRailLayoutTest</code> checks arithmetic.</li>
+    <li>In the wide editor, <code>InstallWorkspace(showFace = false)</code> avoids duplicating the side-pane face. Background keeps its interactive placement preview. Its zoom buttons step two percentage points on a fixed grid; pinch remains continuous.</li>
+    <li>Check narrow phones, landscape, large text, keyboard, sheets and expanded help on the emulator. The library can still be cramped in short landscape; do not infer full adaptive coverage from the editor's split layout.</li>
+  </ul>
+
+  <h3 id="install-and-thumbnails">Install and thumbnails</h3>
+  <ul>
+    <li><code>previewReviewed</code> clears on every commit; <code>InstallWorkspace</code>'s snapshot effect re-marks it. It arms sending, not a redirect to a separate Validate page. <code>validatedBytes()</code> remains the actual safety gate.</li>
+    <li>One read-only render belongs in the device card (80dp plate); status is on a line above the device name, not squeezed beside it. The plugin is one plain line under it, then SAMPLE PREVIEW when the render is approximate, then Checks and Audit as drop-downs, above setup. Audit remains present when empty. Passing checks need no banner; failed checks open expanded with their banner.</li>
+    <li>Show transfer phase/percentage; put protocol messages, windows and payload IDs in Transfer details. Completion is <strong>Request sent</strong>, with watch inspection and plugin restoration instructions.</li>
+    <li>Styles owns face-picker thumbnail refresh. Compare stored before/after pictures, including actual RGB565 quantization and box-filtered output; don't compare against a scaled canvas pretending to be stored output. Refresh the active numbered style once per edit identity, clear the marker on an edit, and treat a no-op as null (<code>ThumbnailPreviewTest</code>). AOD refresh is refused in the repository.</li>
+    <li>Previews render current layers, ordered and alpha-correct; unavailable content is disclosed, never replaced by invented boxes. The <a href="architecture.md#the-preview-pipeline">preview pipeline</a> defines sample readings, locale fallback and ROM-font approximations. Preview review does not establish watch-side acceptance.</li>
+  </ul>
+
+  <h3 id="widget-import">Donor imports</h3>
+  <ul>
+    <li><strong>Donor backgrounds:</strong> Background offers “From another watch face” beside image picking. Reuse the donor catalogue and variant labels, show only the primary background asset, and explain missing or additional full-panel artwork. Review is UNAPPLIED, renders the encoded result, shows the face as it is while held (hold to compare, below) and lists both affected and skipped variants. Apply commits; back/cancel does not. Keep source/review errors in the picker and all content scrollable at large text or short height.</li>
+    <li><strong>Style deletion:</strong> Each numbered style card has its own error-tinted <code>✕</code>, disabled on the last style. It opens one confirmation dialog, like removing a widget: exact bytes reclaimed, renumbering, active-style fallback and the Reset consequence, then Cancel or Delete style. A style still needed by an unapplied background says so and cannot be confirmed. Manage styles, with previews and several picks, serves capacity recovery. Keep at least one numbered style; AOD is separate and cannot be deleted. Keep the selection and confirmation across orientation changes, with scrolling content and reachable actions.</li>
+    <li><strong>Capacity recovery:</strong> Only typed BIN-capacity failures offer Manage styles; partial background additions offer it too. Protect the pending target style, retain image placement and donor picks, and regenerate Review after deletion. Do not re-add successful widgets from a partial batch. State that confirmed deletion was saved separately and cancelling the pending edit does not undo it. Errors remain in the dialog that owns them.</li>
+    <li>A full-screen child from Widgets, not a sixth rail tab. Reuse catalogue grid and shared components; no separate Projects tab. Say whether each donor is cached or requires download, and show unavailable widgets with refusal reasons in List.</li>
+    <li>Pick on the donor face with the editor's hit testing, or use rows for hands without outlines. Number picks in insertion/z-order. Selection offers <strong>Review widget(s)</strong>; only the review's <strong>Add</strong> commits. Face size means used bytes. Single-ticket pricing is exact; sets say “at least” and retain partial-save consequences.</li>
+    <li>Review outlines additions, dims the rest and shows before while held. Both donor and review split on short height (<code>importPageSplits</code>, <code>WidgetImportLayoutTest</code>). Donor-position invariance and the batch commit contract live in the format reference.</li>
+    <li><strong>Hold to compare:</strong> a page whose face shows a change not yet made compares by holding the face, never with Before/After chips: held, it draws the face as it is; released, the change. One <code>FaceCompare</code> (<code>rememberFaceCompare</code>) gives the press, the learned <code>CompareHold</code> line (<code>CompareHint</code>, one shared state, so learning it anywhere clears it everywhere) and an accessibility action that switches between the two. A press compares on widget and set review, donor background review and the clock font page. Where a drag and a pinch place something on the face — a background (still or moving), a picture or text — only a finger held still for a long press compares (<code>stillModifier</code>, after the placing gesture so a drag or pinch cancels it first); while held it takes the finger, so nothing moves, and the face is drawn as it is, a label being replaced included. Those pages say “Hold the face still to see it as it is” until learned.</li>
+    <li>Pricing must not block the next pick: gate picks on saving, not all busy work, and keep pricing progress in the button. Reserve the global progress strip so it cannot shift tap targets. Pick chips scroll on one line; meter/error text has a fixed two-line slot. <code>pickError</code> stays beside its action and clears on the next pick.</li>
+    <li>Variant changes keep the previous face visible until the replacement is ready; reject picks during that interval but leave variant chips usable. Show delayed loading after 300ms, not a flash per tap. Cancellation restores the shown variant label. Errors persist; preparation/download can cancel/retry; saving is single-flight.</li>
+  </ul>
+
+  <h3 id="pictures">Pictures</h3>
+  <ul>
+    <li>Widgets offers <strong>Add an image, GIF or video</strong> under Add widgets from another face, and Background offers the same button. It opens one system picker for images and videos; the picked file's type decides the rest: a GIF or video is placed moving (below), anything else — a one-frame GIF included — still. On Widgets the picture is placed the way a background is placed on the Background page, and the header says so. There is no shape tool: a shape is a picture made elsewhere, white for any colour.</li>
+    <li>Placing a picture and placing a background share their controls, in the same order: the face drawing it live (drag to move, pinch to resize), <code>PlacementControls</code> (the shared Position and Size, with Reset placement), <code>ImageColourControls</code> (the shared colour, previewing), then Discard and the commit. A picture has no fit — it keeps its proportions — and its size steps its own resize ladder (5% rungs, its limits), so the size added is one Edit widget's − and + step back to. The background keeps its 2% zoom.</li>
+    <li>Colour is one rule on both pages (<code>tintedColor</code>): Original colours, the five presets, the sliders or any <code>#RRGGBB</code>; white takes the colour, near-black and transparency stay. It is drawn as soon as it is chosen and applied by Add or Use. Reset placement and a new fit re-centre the image and keep its colour.</li>
+    <li>Shown cost is actual cost: Picture size, Adds and the face-size meter; Add is disabled past the 4 MiB the watch accepts. A dragged picture keeps <code>offFaceKeepVisible</code> on the face, the widget drag's rule. Adding moves to the Canvas with the picture selected, as an import does.</li>
+    <li>An added picture is edited in its variant only, like an import. Its delete dialog, scope line and full-size label say picture and never name a donor face; the undo label is “new picture”.</li>
+  </ul>
+
+  <h3 id="text">Text</h3>
+  <ul>
+    <li>Widgets offers <strong>Add text</strong> under Add a moving picture. Text is placed on the picture page as the picture it becomes, header “Placing text…”, with a <strong>Text</strong> card before Placement: the words (up to four lines, 80 characters), and the font as one field naming it in its own face. It opens a <code>FitDropdownMenu</code>: twelve fonts every phone carries, each in its own face with <code>✓</code> on the current one, a picked file while it is the font, then <strong>Choose a font file (TTF or OTF)…</strong>. A chip per font took most of a screen. The Text card is a <code>ControlCard</code>; that a chosen file draws the text and is not kept is behind the Font heading's ⓘ.</li>
+    <li>Its size is the font's, set as any widget's size is: the shared Size card reads only “n px font”, −/+ step one pixel (8 to 200) and a pinch changes the font size, and each change draws the text again rather than resampling it. There is no fact card: the picture's w × h, what it adds and the face's room are a picture's facts, and a text is a few KB, so only the refusal shows, in the error colour, when it would not fit the 4 MB the watch accepts.</li>
+    <li>What stops the words being drawn (nothing typed, too long, too many lines, too big for the face at that size) is said in the error colour under the field. The face keeps what was last drawn and Add waits until the card and the face agree.</li>
+    <li>Behind the Text heading's ⓘ: it is added as a picture, so the watch shows exactly what is drawn, its words stay as typed whatever language the watch uses, and once added it is a picture in every way, so changing its words means deleting it and adding the text again. The undo label is “new text”.</li>
+    <li>A label — a Value drawing a fixed word — is named by its word, label “steps”, in the widget list, the tray and Edit widget, not by its constant-zero reading; its kind tag's ⓘ says it is a fixed word in the watch's language. Edit widget on a label has a <strong>Font</strong> card: it states “The watch’s own font” (the heading's ⓘ says what drawing it as a picture changes), and <strong>Draw in another font</strong> opens the text page with that word, size and colour, set where the watch draws it (against the label's own side, on the line it writes from the top of its box), and the face there leaves the label out. Its commit is <strong>Replace label</strong>, and a line above it says replacing deletes the label and Undo brings it back: a destructive consequence, so it stays visible. Both changes are one undo step; if the label cannot be removed, the text stays and a message says the label is still there.</li>
+  </ul>
+
+  <h3 id="clock-font">Clock font</h3>
+  <ul>
+    <li>The Canvas tray's Layers page offers <strong>Clock font</strong>, enabled when the selected style draws a clock part as pictures of characters (hours and minutes, seconds, a second time zone, the weekday). Hours and minutes include the colon between them when the face draws it as a picture of two dots. It takes the Widgets page as placing a picture does, header “Choosing the clock’s font”. Edit widget on such a digit, or on the colon, has a <strong>Font</strong> card: the font they are in (“The face’s own digits” or “Drawn in Serif.”; what the digits are is the heading's ⓘ), <strong>Draw the clock in another font</strong> (opens the page) and <strong>Reset font</strong>.</li>
+    <li>The face is pinned at the top as on the placing pages (<code>PinnedFacePage</code>), drawn as the repository drew it for the last request that finished, exactly what Apply commits. Once a font is drawn, holding the face shows it as it is (hold to compare, below); there are no Before/After chips. Undo takes an applied font back. “Drawing…” shows while a newer request is drawn. Then <code>ControlCard</code>s in order: Font (the text page's drop-down; the font-file note behind its ⓘ), Redraw (a chip per part, only when the style has more than one), the editor's one <code>ColourPicker</code> in its previewing mode (Original colours keeps each part's own; any other is drawn exactly, not by brightness, which with the box rule is its ⓘ), Applies to (the shared <code>ScopeChoice</code>, All styles / This style only, not on the always-on display), a line naming what changes, then Discard and <strong>Apply font</strong>, whose ⓘ holds what the digits keep and how Undo and Reset font take it back.</li>
+    <li>It opens with <strong>no font chosen</strong>, every part on, at the tray's style scope: the field reads “Choose a font”, a line under it states what the clock is in now (“Now in the face’s own digits”, or the font it was redrawn in), the face is the clock as it is and Apply waits. Opening on a font of the page's own choosing showed a face that looked changed before anything was asked for. Parts, colour and scope can be set first; the face is drawn once a font is picked. A request that cannot be drawn (no part chosen, a font without these characters) is said in the error colour on the Font card; the face keeps the last drawing and Apply waits until they agree.</li>
+    <li>Behind Apply font's ⓘ: the digits stay pictures, so the watch shows them exactly as drawn and they still tell the time; they keep their size and place; weekday names are drawn in the phone's language and no longer follow the watch's. The undo label is “clock font”.</li>
+  </ul>
+
+  <h3 id="moving-background">Moving background</h3>
+  <ul>
+    <li>A GIF or video picked with Background's <strong>Add an image, GIF or video</strong> is placed on its own page, in the still background's order: the face <em>playing</em> it as the watch will (only the frames kept, at their timing, with Pause/Play), a fact card (Frames <em>n of total</em>, Loop, Adds, face-size meter), <strong>Frames kept</strong> (Fewer/More, “Every frame” or “1 in every n frames”, a one-line cost hint), Fit, <code>PlacementControls</code>, <code>ImageColourControls</code>, the loop note, then Discard and <strong>Add moving background</strong>. The header says positioning · unapplied.</li>
+    <li>It opens keeping every frame of the longest part that fits, refitted whenever frames kept, size, fit or start change; Add is disabled past the 4 MiB the watch accepts. Larger, a pinch, Reset and a Fit chip are greyed out or stop where not one frame would fit what the picture covers, as a widget's Larger stops at the ceiling; a drag still moves it. A one-frame GIF is placed as a still background, and a face without room for one frame says so.</li>
+    <li>“It plays in a loop on the watch. A GIF’s own loop count is not kept.” is shown while a GIF is placed (a video’s says “without sound”); once added, when nothing records the source, “It plays in a loop on the watch.” On the always-on display a warning that cannot be dismissed says it plays about three times slower and can use more battery, while placing it and while it is there.</li>
+    <li>While a variant has one, Background leads with it: the face shows frame 0, a card says <em>n frames · s loop</em> and that a new background replaces it while Remove leaves none, and the subtitle reads moving · n frames · s. Adding one replaces the style's background: an earlier moving one is deleted and the still one with its Static, as Remove deletes it, both rooms counted free, so removing the moving one later leaves no background. The widget list's Remove still confirms “deleted with its frames … Undo, or add the GIF again, to have it back”. The undo label is “moving background”.</li>
+    <li>Install shows the active style's frame 0 with a line “Moving background: n frames, s loop”, and “n moving pictures play on top” when the style draws any Animation on top, whether added here or arriving with the face (an imported probe).</li>
+    <li><strong>Video:</strong> the same picker takes a video. Its page adds <strong>Part of the video</strong> under Frames kept (<strong>Part of the GIF</strong> for a GIF of a second or more): “Start: s” with Earlier/Later and “Length: s” with Shorter/Longer, half a second a press, Longer greyed at the longest part that fits. A video is read once, ten frames a second; every change is cut from that read. The loop note drops the GIF sentence and says it plays without sound.</li>
+  </ul>
+
+  <h3 id="moving-picture">Moving picture</h3>
+  <ul>
+    <li>A GIF or video picked with Widgets' <strong>Add an image, GIF or video</strong> is placed on the picture page, in its order, plus what the moving background page adds: the face plays it, Pause/Play under the face, a fact card (Moving picture w × h, Frames <em>n of total</em>, Loop, Adds, meter), <strong>Frames kept</strong> with the cost of one frame at the chosen size, the Part card, colour, the loop note and the always-on warning, then Discard and Add to the variant. Larger and a pinch stop at the largest size where one frame still fits (a still picture: where it fits), so nothing placed outgrows the room left.</li>
+    <li>The detail line says the size is chosen here for good: a moving picture cannot be resized once added. Edit widget shows move, nudge, arrange, duplicate and Remove, scoped “Added moving picture. Edits affect this variant only.” Remove confirms it is deleted with its frames; the undo label is “moving picture”.</li>
+    <li>Canvas plays every animation on the selected variant. <strong>Pause animation</strong> / <strong>Play animation</strong> sits under the face only when there is one, its height taken off the face's; a drag, a set nudge or a placement draws the face at rest. Install, Styles and the picker thumbnail show frame 0.</li>
+  </ul>
+
+  <h3 id="background-scope">Background scope</h3>
+  <ul>
+    <li>With more than one style and a style on the canvas, Background shows <strong>Applies to</strong>: <strong>All styles</strong> or <strong>This style only</strong> (the default, as every other edit is: a replacement used to reach every style, so a face could not keep a background a style), with one line naming the style that changes. AOD and one-style faces show no choice: their edit already writes one entry.</li>
+    <li>The page's buttons are <strong>Remove background</strong>, <strong>Add an image, GIF or video</strong> and <strong>From another watch face</strong>, in that order, while the selected style shows a background (<code>selectedBackgroundShown</code>: a moving one, or a still one that is not all black), and the last two alone while it shows none. Any of the adds replaces whatever is there — a still or moving background, from a file or another face — as one undo step, and the placing pages say “It replaces this style’s current background.”</li>
+    <li>Remove acts at once, without a dialog, since Undo brings it back: the selected style's moving background is deleted and every still one in the chosen scope deleted with its Static, as on a face that ships without one, freeing its room; the watch shows black. A later picture is then added there, and All styles gives a bare style one alongside its siblings' replacements. A background that cannot go that way (drawn twice, or offset) is painted black instead.</li>
+    <li>The moving-background page has no scope choice: one goes to the selected style alone (each frame costs about 100 KB in every style it is in), and on a face with more than one style a line under the loop note says so.</li>
+    <li>The scope decides add or replace from the scoped style: alone, a style painting onto black is given a background (its own Adds notice says “alone”) while its siblings keep theirs. The partial-background note is about the whole group and is hidden while the scope is one style. Import from another face takes the same scope.</li>
+  </ul>
+
+  <h3 id="photos">Photos face</h3>
+  <ul>
+    <li>Reached only from the Photos face's sheet in the catalogue, whose one action is <strong>Send photos to it</strong> in place of Not editable; the catalogue card's badge says PHOTOS. It is a full-screen page with the editor's header: a back button, the page's title (Canvas is titled with the face, as the editor's is with the project) and subtitle, and the app menu last (<code>AppMenuAction</code>, whose problem report adds the page's counts and transfer flags).</li>
+    <li>The editor's bottom bar with four of its destinations in its order, <strong>Canvas</strong>, <strong>Background</strong>, <strong>Styles</strong> and <strong>Install</strong> (the same glyphs and labels, <code>RailItem</code>); it opens on Canvas, as the editor does, and each page keeps its own scroll position. No page has a Next button: the rail is how to move on, as in the editor. Subtitles follow the editor's (face and style; N styles; check and send to your watch), with Background's saying what is being placed.</li>
+    <li><strong>Canvas</strong> is the editor's Canvas for a face whose one widget is its clock: the face fitted to the height left (the editor's 288 dp cap), drawn with the photo being placed (else the one shown) and the clock outlined in the selected-widget colour (<code>tertiary</code>, 2 dp, round the clock picture's drawn pixels); under it the editor's selection tray in its frame (<code>TrayPadding</code>, <code>TrayTitle</code> <em>Clock</em> with its ⓘ in the dots' corner, the colour as <code>#RRGGBB · colour N of M</code> in the facts line), then the watch's colours as the tray's square buttons, two rows of seven slots (the second row's gaps), scrolling sideways, opening on the column of the current colour. The clock is always the selection; there is no Widgets page, since there is no other widget. Without the plugin's list the facts line says the colour can't be changed here and the ⓘ says why.</li>
+    <li><strong>Background</strong> is the editor's Background page in its order: the 256 × 402 face drawn as it will be sent (drag, pinch), pinned at the top while everything under it scrolls, as on the editor's placing pages (<code>PinnedFacePage</code>; a short or landscape window scrolls whole), then Fit, the shared <code>PlacementControls</code> and <code>ImageColourControls</code> (the same colour rule, kept through a new fit and Reset), then the actions for the photo: <strong>Add photos · N left</strong> (the room on the button; with none left it is disabled and its ⓘ says why) and, where the editor discards, <strong>Take out</strong> for a new photo or <strong>Take off the watch</strong> for a sent one. The one addition is the strip under the face: every photo the face will have, in its order, sent ones first, each drawn as it is (a new or brought-back one in its colour). The one being placed is outlined and marked SHOWN: it is the one the face shows once sent, so choosing what to show is choosing what to place. New ones are marked NEW, sent ones moved CHANGED, and one sent before copies were kept is NO COPY, which can be shown or taken off but not placed (<em>Can't be placed again</em> with its ⓘ). Choosing a sent photo brings it back on its kept original, placed as it went: unmoved it is not sent again. Taking a photo out says so in a snackbar with <strong>Undo</strong>, which puts it back as it was; the page's snackbars sit above the rail, so an action in one never covers a destination. The strip scrolls itself only when the photo being placed is out of view, and each thumbnail is announced with its place, whether it is new, placed again or already on the watch, and that the one being placed is shown once sent. Empty, the page is the empty face, <strong>Choose photos · N left</strong> and Photo details.</li>
+    <li><strong>Styles</strong> is laid out as the editor's Styles page so it reads the same: a row per style in the editor's row treatment (54 × 85 face, <code>styleLabel</code>, a <em>Selected</em> line and ● on the chosen one; no delete), each face drawn on the photo being placed (else the one shown) with the plugin's picture of its clock in the clock's colour; <strong>About these styles</strong> (<code>FitInfoLink</code>). The colour is not here: it is the clock's, on Canvas, as a widget's is in the editor. No line of explanation sits loose on the page: without the plugin's list it is <em>Styles unavailable</em> with its ⓘ. The last row is <strong>No clock</strong>, the face drawn bare: sends then leave the clock out, which is how the watch comes to draw none. Otherwise every send carries a clock, so there is no "leave it as it is"; Install names the clock that goes (<em>Clock: none</em> for No clock), and a change of clock alone is enough to send. With No clock, Canvas draws no outline, its facts line says <em>No clock</em>, no colours are offered and the ⓘ points back to Styles.</li>
+    <li><strong>Install</strong> is left-aligned like the editor's: <strong>Changes to send</strong> as a heading (<em>none</em> when the album is as sent) with its ⓘ, the strip as on Background (tapping a photo returns there to place it), what the send changes worked out against what was last sent (N new, N placed again, N taken off the watch, which photo is shown) and the clock that goes, a rule, then the editor's send section in its order: the shared environment advisory (<code>EnvironmentAdvisoryBanner</code>), a stopped banner, the live status line, the <code>SetupChecklist</code> or the Photos timeline with one <strong>Send to the watch</strong>, About the Photos face and Start over. There are no per-photo actions here: showing, changing and taking off are all arranged on Background and Styles, and one send does them together. No sentence of instruction sits loose: what the list means is in the heading's ⓘ.</li>
+    <li>The album as arranged is a draft: leaving the page, or Android closing the app while the setup sends you to its settings, loses none of it. Picks and brought-back photos come back placed and coloured as they were, with the photos taken off and the one chosen to show, until they are sent. A restored one is placed from its kept reduced original rather than the picked file.</li>
+    <li>Picking past the room keeps the first ones and says how many were left out. A photo is drawn onto black, cover by default. The result says <strong>Request sent</strong>, never that the photos are on the watch, and the about section says that Galaxy Wearable may not list these photos.</li>
+  </ul>
+
+  <h3 id="library-interaction">Library</h3>
+  <ul>
+    <li>Sort by reversing the primary comparator only; keep stable tie-breakers. Opposite direction labels use equal-length monospace text, at most eight characters, to fit the 288dp content width of a 320dp phone (<code>SortChipLayoutTest</code>).</li>
+    <li><code>openingProjectId</code> replaces only the selected row's chevron with a spinner, retains its opacity and dims others. Don't reserve spinner width on every idle row. Downloads gate on project opening; cached cards use <code>canSelectFace</code>, so background catalogue refresh cannot silently disable them.</li>
+    <li>Project rows in the scrolling face sheet use a Column, not a nested vertical LazyColumn. Source, stored project name and age remain distinct; custom descriptions announce outdated status. Updates create another project. “No download” promises come from <code>hasPackage</code>, not a row's existence.</li>
+  </ul>
+
+  <h3 id="tokens-and-coverage">Tokens, departures and coverage</h3>
+  <ul>
+    <li>Platform <code>SansSerif</code>/<code>Monospace</code> replace the original Plex design; no font files are bundled. Quantities use mono labels/numeric/micro/readout (20sp). Font changes require a fresh device layout pass.</li>
+    <li>Spacing is expressed by literals; unused spacing/elevation token classes were removed. Elevation uses surface colour and a 1dp border, never shadow. Tokenizing spacing or enlarging touch targets is a separate layout change, not an incidental cleanup.</li>
+    <li>Known touch-target compromise: icon actions are 38dp and chips 42dp against the 48dp guideline. <code>FitDetails</code> has a 48dp minimum; <code>FitInfo</code> glyphs rely on Compose's 48dp touch-target expansion. Preserve consistency until an app-wide size change is tested.</li>
+    <li><code>FitFaceSemanticColors</code> must be provided per theme: warning/experimental once fell back to dark colours on light backgrounds (1.50:1/1.73:1); light roles now measure 6.07:1/6.27:1. <code>SemanticColorContrastTest</code> checks values; <code>FitFaceThemeTest</code> checks the provider.</li>
+    <li>Use <code>MaterialTheme.fitText.secondary</code> and <code>tertiary</code> without call-site alpha. Recorded secondary contrast is 6.52:1 dark / 6.67:1 light, tertiary 5.56:1 / 5.27:1. Extra dimming formerly reduced micro text to 4.08/3.38 and project age to 2.58. Tertiary derives from onSurfaceVariant × .90 for margin; .82 barely passed at 4.52. <code>SmallTextContrastTest</code> holds the 4.5:1 floor on all surfaces. Disabled controls retain their treatment.</li>
+    <li>Open typography issue: 11sp Medium mono teal actions have 12.77:1 contrast but can still be too small; changing colour does not solve size. Micro labels are 9.5sp. Browser demos approximate phone dimensions, not Android text metrics.</li>
+    <li>Native Robolectric checks geometry and expandable-help semantics, not device truncation. AlertDialogs can fail to idle in that harness; gesture wiring and updater dialogs need emulator checks. <a href="development.md#test-constraints-and-troubleshooting">Development</a> records precise coverage limits.</li>
+  </ul>
+</section>
+
+<script>
+  // The only script here, and it only shows and hides. Keep it that way: this file has to
+  // render usefully even with JavaScript disabled, which it does — both panels are in the
+  // markup and "both" is the default state.
+  const buttons = document.querySelectorAll('.toggle button');
+  const panels = document.querySelectorAll('.panel');
+  for (const b of buttons) {
+    b.addEventListener('click', () => {
+      const show = b.dataset.show;
+      for (const other of buttons) other.setAttribute('aria-pressed', String(other === b));
+      for (const p of panels) {
+        p.classList.toggle('hidden', show !== 'both' && p.dataset.scheme !== show);
+      }
+    });
+  }
+</script>
+
+</body>
+</html>

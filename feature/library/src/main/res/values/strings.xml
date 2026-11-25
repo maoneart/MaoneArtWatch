@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copy for the catalogue and projects screens.
+
+  Names are prefixed `library_` because library-module resources merge into one table at
+  the app level: a bare name that collided with another module's would be silently
+  overridden rather than reported. Decorative glyphs (⌕ ◇ × ›) stay inline in the
+  Composables — they are symbols, not copy, and a translator has nothing to do with them.
+-->
+<resources>
+    <!-- Header -->
+    <string name="library_brand">MaoneArt Watch Studio</string>
+    <string name="library_title_watch_faces">Watch faces</string>
+    <string name="library_title_projects">Your projects</string>
+    <string name="library_subtitle_watch_faces">Pilih watch face, ubah jam, detak jantung &amp; langkah kaki, lalu kirim ke Fit 3.</string>
+    <string name="library_subtitle_projects">Continue your saved edits on this device.</string>
+    <string name="library_action_refresh">REFRESH</string>
+    <string name="library_action_syncing">SYNCING</string>
+    <string name="library_tab_watch_faces">@string/library_title_watch_faces</string>
+    <string name="library_tab_projects">Projects %1$d</string>
+    <!-- Before the saved projects have been read: no count, rather than a false 0. -->
+    <string name="library_tab_projects_loading">Projects</string>
+
+    <!-- Catalogue grid -->
+    <string name="library_catalogue_a11y">Watch face catalogue</string>
+    <string name="library_search_placeholder">Search faces or number</string>
+    <string name="library_search_clear">Clear the search</string>
+    <string name="library_sort_label">Sort</string>
+    <!-- Sort chips, shared by both library pages so switching tabs does not reword them.
+         The selected one shows the direction it is in and reverses on a second tap; the
+         rest name the order they would put the list in. Two of the three say their
+         direction in words; the face number has no such pair, so it carries an arrow.
+         Both labels of a pair MUST stay the same number of characters: labelMedium is
+         monospace, so equal length is equal width, and that is what stops the chip
+         resizing when it is reversed and shoving the row sideways.
+         The row is also a width budget, and a tight one. "Face number" made it 318dp wide
+         against the 288dp a 320dp phone leaves inside the page insets, so the last chip was
+         cut off by the screen edge with its arrow — the half that says which way it sorts —
+         in the part that had scrolled out of sight. Eight characters is the bound every
+         label is under for that reason; LibrarySortRow has the arithmetic. -->
+    <string name="library_sort_newest">Newest</string>
+    <string name="library_sort_oldest">Oldest</string>
+    <string name="library_sort_name_az">Name A–Z</string>
+    <string name="library_sort_name_za">Name Z–A</string>
+    <string name="library_sort_number_asc">Number ↑</string>
+    <string name="library_sort_number_desc">Number ↓</string>
+    <!-- Only the label can say what a second tap does; the chip looks the same either way. -->
+    <string name="library_sort_reverse_a11y">Sorted by %1$s. Tap to reverse.</string>
+    <string name="library_source_cached">Cached catalogue</string>
+    <string name="library_source_live">Live catalogue</string>
+    <string name="library_face_and_style_count">%1$d faces · %2$d styles</string>
+    <string name="library_no_matches_title">No matching faces</string>
+    <string name="library_loading_a11y">Loading the watch face catalogue</string>
+    <string name="library_loading_title">Loading watch faces…</string>
+    <string name="library_unavailable_title">Catalogue unavailable</string>
+    <!-- Only used when nothing recorded a reason; the real one is shown in its place. -->
+    <string name="library_unavailable_detail">No faces returned. Try again, or use More options → Report a problem.</string>
+    <string name="library_try_again">@string/ui_try_again</string>
+    <!-- Labels the header menu and its report entry after a crash, so the offer finds the person. -->
+    <string name="library_previous_crash">Report crash</string>
+
+    <!-- Face card -->
+    <plurals name="library_style_count">
+        <item quantity="one">%1$d style</item>
+        <item quantity="other">%1$d styles</item>
+    </plurals>
+    <string name="library_face_number">#%1$s</string>
+    <string name="library_not_editable_badge">NOT EDITABLE</string>
+    <!-- name, face id, style count -->
+    <string name="library_face_card_a11y">%1$s, face %2$s, %3$s</string>
+    <string name="library_face_card_a11y_not_editable">%1$s, face %2$s, %3$s, not editable</string>
+    <string name="library_face_card_a11y_photos">%1$s, face %2$s, %3$s, takes your photos</string>
+    <string name="library_photos_badge">PHOTOS</string>
+    <string name="library_send_photos">Send photos to it</string>
+    <string name="library_send_photos_note">This face has nothing to edit. It shows your own photos, which this app can send to it.</string>
+    <plurals name="library_face_card_projects">
+        <item quantity="one">%1$d project</item>
+        <item quantity="other">%1$d projects</item>
+    </plurals>
+
+    <!-- Face sheet -->
+    <string name="library_sheet_kind">Watch face</string>
+    <string name="library_sheet_face_version">face %1$s · version %2$s</string>
+    <!-- The style name is `:core:ui`'s `styleLabel`, the same one the editor shows. -->
+    <string name="library_sheet_preview_a11y">Selected preview for %1$s, %2$s</string>
+    <string name="library_sheet_choose_style">Starting style</string>
+    <string name="library_sheet_package">Download size</string>
+    <string name="library_sheet_error_label">FAILED</string>
+    <string name="library_sheet_uneditable_label">N/A</string>
+    <string name="library_download">Download &amp; edit</string>
+    <string name="library_download_in_progress">Downloading…</string>
+    <!-- The package is already on disk; only the copy beside the project and the parse
+         are left, and saying "downloading" over a caption promising none would be a lie. -->
+    <string name="library_open_in_progress">Opening…</string>
+    <string name="library_download_not_editable">@string/ui_not_editable</string>
+    <string name="library_download_cache_note">Downloads stay on this device and are downloaded again only when the store publishes a new version.</string>
+    <!-- The face sheet, once this face already has projects of its own. -->
+    <string name="library_sheet_your_projects">Your projects</string>
+    <string name="library_sheet_start_new">Start something new</string>
+    <string name="library_new_project">New project</string>
+    <!-- The package is cached but no project was ever kept from it, so there is nothing to
+         download and no sibling for "new" to be new beside. -->
+    <string name="library_open_edit">Open &amp; edit</string>
+    <!-- version name -->
+    <string name="library_update_to">Update to %1$s</string>
+    <string name="library_update_note">Creates a new project with the newer face. Existing projects stay unchanged; their edits cannot carry over.</string>
+    <string name="library_update_short">Starts a new project</string>
+    <string name="library_project_outdated">OUTDATED</string>
+    <!-- project name, style, how long ago it was edited -->
+    <string name="library_sheet_project_a11y">Open %1$s, %2$s, edited %3$s</string>
+    <!-- The same, for a row carrying the OUTDATED badge. The row sets its own
+         contentDescription, which replaces the label a screen reader would otherwise build
+         from the text in it — so the badge has to be said here or it is not said at all,
+         and it is the one thing distinguishing this row from its siblings. -->
+    <string name="library_sheet_project_a11y_outdated">Open %1$s, %2$s, edited %3$s, outdated</string>
+    <!-- And the same row again while its project is being opened. Reading the package and
+         parsing its container takes seconds, so the row has to say the tap was taken; this
+         replaces the description above rather than adding to it, for the same reason the
+         badge had to go into one — the row sets its own, and nothing else is heard. -->
+    <string name="library_sheet_project_a11y_opening">Opening %1$s</string>
+    <string name="library_style_thumb_a11y">%1$s, %2$s</string>
+    <string name="library_style_thumb_a11y_selected">%1$s, %2$s, selected</string>
+
+    <!-- Projects -->
+    <string name="library_projects_saved">Saved automatically</string>
+    <string name="library_projects_local_count">%1$d local</string>
+    <string name="library_projects_loading_title">Loading projects…</string>
+    <string name="library_projects_loading_a11y">Loading your saved projects</string>
+    <string name="library_projects_empty_title">No projects yet</string>
+    <string name="library_projects_empty_detail">Download a watch face or import a project to start.</string>
+    <string name="library_browse">Browse watch faces</string>
+    <string name="library_project_face_line">face %1$s · %2$s</string>
+    <string name="library_project_face_line_plain">face %1$s</string>
+    <string name="library_projects_search_placeholder">Search your projects</string>
+    <string name="library_projects_no_matches_title">No matching projects</string>
+    <!-- Two projects on one face are the same face to the watch, which keeps one per face. -->
+    <!-- A custom face: one face's clock on an empty panel, made on the phone from the store's package. -->
+    <string name="library_custom_face_title">Start a custom face</string>
+    <string name="library_custom_face_detail">Clock on an empty face</string>
+    <string name="library_custom_face_info">Start from a clock on an empty face, then add your own background and widgets.</string>
+    <string name="library_custom_face_name">Custom face</string>
+    <string name="library_custom_face_download">↓ %1$s download</string>
+    <string name="library_custom_face_cached">No download needed</string>
+    <string name="library_custom_face_waiting">Waiting for the catalogue</string>
+    <string name="library_custom_face_unavailable">Not in the catalogue right now</string>
+    <string name="library_custom_face_source_fallback">Info_4</string>
+    <!-- Where it goes on the watch: each custom face gets a face number of its own (CUSTOM_FACE_NUMBERS),
+         and Galaxy Wearable has no picture for a number outside its catalogue (T3). -->
+    <string name="library_custom_face_slot">Installs as its own face, numbered 201 to 250, beside your other faces. Galaxy Wearable shows it as a blank tile.</string>
+    <string name="library_custom_face_downloading">Downloading %1$s… %2$d%%</string>
+    <string name="library_custom_face_building">Building your custom face…</string>
+    <string name="library_projects_shared_face_note">Projects based on the same face share a watch slot. Installing one replaces the other on your watch.</string>
+    <!-- project name -->
+    <string name="library_project_more_a11y">More options for %1$s</string>
+    <!-- The spinner that replaces a row's chevron while its project is being opened. This
+         row builds no description of its own, so the label is heard beside its own text. -->
+    <string name="library_project_opening_a11y">Opening</string>
+    <string name="library_project_rename">Rename</string>
+    <string name="library_project_duplicate">Duplicate</string>
+    <string name="library_project_delete">@string/ui_delete</string>
+    <!-- The name the copy was given; the list may be sorted so it landed out of sight. -->
+    <string name="library_project_duplicated">@string/ui_project_duplicated</string>
+    <!-- Export and import. One word each, like Rename/Duplicate/Delete beside them. -->
+    <string name="library_action_import">IMPORT</string>
+    <string name="library_project_export">Export</string>
+    <!-- project name, then the size of the file that was written -->
+    <string name="library_project_exported">Exported “%1$s” — %2$s</string>
+    <!-- project name -->
+    <string name="library_project_imported">Imported as “%1$s”</string>
+    <string name="library_rename_title">@string/ui_rename_project</string>
+    <string name="library_rename_label">@string/ui_project_name</string>
+    <string name="library_rename_confirm">@string/library_project_rename</string>
+    <string name="library_delete_title">@string/ui_delete_project_title</string>
+    <!-- project name -->
+    <string name="library_delete_message">@string/ui_delete_project_message</string>
+    <string name="library_delete_confirm">@string/ui_delete</string>
+    <string name="library_cancel">@string/ui_cancel</string>
+
+    <!-- Package size -->
+    <string name="library_size_unavailable">size unavailable</string>
+    <string name="library_size_on_device">On this device</string>
+    <string name="library_size_bytes">%1$d B</string>
+    <string name="library_size_kib">%1$.1f KiB</string>
+    <string name="library_size_mib">%1$.1f MiB</string>
+</resources>

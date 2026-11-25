@@ -1,0 +1,69 @@
+name: Build MaoneArt Watch Studio APK
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant Execute Permission to Gradlew
+        run: chmod +x gradlew
+
+      - name: Run Core Unit Tests
+        run: ./gradlew --no-daemon :core:model:testDebugUnitTest :core:format:testDebugUnitTest :core:data:testDebugUnitTest
+
+      - name: Build Android Release APK
+        run: ./gradlew --no-daemon :app:assembleRelease --stacktrace
+
+      - name: Prepare APK Asset
+        run: |
+          mkdir -p release-output
+          cp app/build/outputs/apk/release/app-release.apk release-output/MaoneArtWatch.apk
+          ls -la release-output/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaoneArtWatch-apk
+          path: release-output/MaoneArtWatch.apk
+          retention-days: 30
+
+      - name: Create GitHub Release & Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main')
+        with:
+          tag_name: "v1.0.${{ github.run_number }}"
+          name: "MaoneArt Watch Studio v1.0.${{ github.run_number }}"
+          prerelease: true
+          body: |
+            ### ⌚ MaoneArt Watch Studio — Galaxy Fit 3 (SM-R390) Custom Watch Face Editor
+            - **Full Watch Face Canvas Editor**: Ubah tampilan angka jam (termasuk gambar ulang digit dengan font kustom), widget detak jantung, langkah kaki, baterai, *arc gauge*, garis, teks kustom, dan warna.
+            - **Animated Background & Always-On Display (AOD)**: Mendukung gambar statis, GIF bergerak, klip video pendek, dan mode Always-On Display terpisah (slot kustom `201–250` atau edit template).
+            - **Direct Bluetooth Delivery & Validasi Ketat**: Memvalidasi CRC-16 dan batas ukuran 4 MiB melalui `Session.validatedBytes()` sebelum mengirim via Bluetooth ke Samsung Galaxy Fit 3.
+            - *Berbasis proyek open-source MIT `satvikgosai/fitface-studio` — lihat `LICENSE` & `NOTICE.md`.*
+          files: release-output/MaoneArtWatch.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

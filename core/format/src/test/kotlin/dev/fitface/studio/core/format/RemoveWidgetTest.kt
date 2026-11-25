@@ -1,0 +1,155 @@
+package dev.fitface.studio.core.format
+
+import dev.fitface.studio.core.model.WidgetPlacement
+import java.nio.file.Files
+import java.nio.file.Path
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.Test
+
+class RemoveWidgetTest {
+    private val root = Path.of(requireNotNull(System.getProperty("fit3.corpusRoot")))
+    private val live00106 = root.resolve("SM-R390_00106/assets/SM-R390_00106_256x402.bin")
+    private val live00046 = root.resolve("SM-R390_00046/assets/SM-R390_00046_256x402.bin")
+
+    /** The corpus is never committed, so skip rather than fail without it. */
+    @Before
+    fun requireCorpus() {
+        assumeTrue(
+            "corpus containers are not available under $root",
+            Files.isRegularFile(live00106) && Files.isRegularFile(live00046),
+        )
+    }
+
+    private fun load(path: Path) = Fit3Container.parse(Files.readAllBytes(path))
+
+    @Test
+    fun removingWidgetZeroIsNoLongerBlockedByAlwaysZeroRecordFields() {
+        // Every widget record in the live catalogue stores zero at +0x08, +0x10 and
+        // +0x14. Treating those as possible index references made "remove widget 0"
+        // fail on every face, because 0 is always in the affected range. A zero-valued
+        // field is still not a reference, and this face's `aod.bin` is where that can be
+        // shown on its own: nothing in it is positioned against its widget 0, so the only
+        // thing that could refuse the removal is a scan of always-zero words.
+        val source = load(live00106)
+        val styles = listOf("aod.bin")
+        val target = FaceRecordParser.scanWidgets(source.entryByBasename("aod.bin"))
+            .single { it.globalIndex == 0 }
+
+        val edit = StructuralEditor.removeWidget(
+            source = source,
+            entryBasenames = styles,
+            globalIndex = target.globalIndex,
+            widgetType = target.widgetType,
+            sequenceId = target.sequenceId,
+            x = target.x,
+            y = target.y,
+            requireFinal = false,
+        )
+
+        assertTrue(edit.container.validate().isValid)
+        assertEquals(
+            FaceRecordParser.scanWidgets(source.entryByBasename("aod.bin")).size - 1,
+            FaceRecordParser.scanWidgets(edit.container.entryByBasename("aod.bin")).size,
+        )
+    }
+
+    /**
+     * The other half of the same rule, and the reason the removal above had to move to
+     * `aod.bin`: a widget that other records are *actually* positioned against cannot be
+     * cut out.
+     *
+     * Twelve of this style's nineteen widgets are measured from widget 0. Renumbering
+     * alone would leave all twelve still naming index 0 — which by then is a different
+     * widget — so they would be laid out against it and land somewhere else on the watch.
+     * The container would parse, validate and install; only the face would be wrong.
+     */
+    @Test
+    fun removingAWidgetOthersArePositionedAgainstIsRefused() {
+        val source = load(live00106)
+        val entry = source.entryByBasename("style0.bin")
+        val widgets = FaceRecordParser.scanWidgets(entry)
+        val target = widgets.single { it.globalIndex == 0 }
+        val dependents = widgets.count { it.liveAlignment?.targetGlobalIndex == 0 && it != target }
+        assertTrue("this face is expected to align widgets to widget 0", dependents > 0)
+
+        val failure = assertThrows(Fit3FormatException::class.java) {
+            StructuralEditor.removeWidget(
+                source = source,
+                entryBasenames = listOf("style0.bin"),
+                globalIndex = target.globalIndex,
+                widgetType = target.widgetType,
+                sequenceId = target.sequenceId,
+                x = target.x,
+                y = target.y,
+                requireFinal = false,
+            )
+        }
+
+        assertTrue(
+            "the message has to name the cost: ${failure.message}",
+            failure.message!!.contains("positioned against"),
+        )
+    }
+
+    @Test
+    fun handWidgetsWithNoDrawnExtentAreClassifiedAsHidden() {
+        // 00046 is the analog face: its three type-2 hand records store a pivot but
+        // no width or height, so the canvas has nothing to draw or drag.
+        val guides = FaceRecordParser.widgetGuides(
+            load(live00046).entryByBasename("style0.bin"),
+        )
+        val hands = guides.filter { it.type == 2 }
+
+        assertTrue(hands.isNotEmpty())
+        assertTrue(hands.all { it.placement == WidgetPlacement.HIDDEN })
+        assertTrue(guides.any { it.placement == WidgetPlacement.BACKGROUND })
+        assertTrue(guides.any { it.placement == WidgetPlacement.CANVAS })
+    }
+
+    @Test
+    fun thumbnailRegenerationTouchesOnlyThePreviewEntry() {
+        val source = load(live00106)
+        val style = source.entryByBasename("style0.bin")
+        val background = FaceRecordParser.scanImages(style).first()
+            .let { FaceRecordParser.decodeImage(style, it) }
+
+        val edit = requireNotNull(
+            FaceEditor.replacePreviewThumbnail(source, styleIndex = 0, composed = background),
+        ) { "the stock thumbnail is not already the style background" }
+
+        assertTrue(edit.container.validate().isValid)
+        assertEquals(source.fileSize, edit.container.fileSize)
+        assertEquals(listOf("preview.bin"), edit.changedStyles)
+        source.entries.filter { it.basename != "preview.bin" }.forEach { entry ->
+            assertArrayEquals(
+                entry.data,
+                edit.container.entryByBasename(entry.basename).data,
+            )
+        }
+        val raster = FaceRecordParser.scanImages(
+            edit.container.entryByBasename("preview.bin"),
+        ).first()
+        assertEquals(IMAGE_RGB565, raster.format)
+    }
+
+    /**
+     * Re-rendering is automatic now, so it runs on every validation pass. Writing the
+     * same pixels back is a no-op, not a failure — otherwise the editor would report
+     * an error for a thumbnail that is already correct.
+     */
+    @Test
+    fun regeneratingAnUnchangedThumbnailIsANoOp() {
+        val source = load(live00106)
+        val previewEntry = source.entryByBasename("preview.bin")
+        val stored = FaceRecordParser.scanImages(previewEntry).first()
+            .let { FaceRecordParser.decodeImage(previewEntry, it) }
+
+        assertNull(FaceEditor.replacePreviewThumbnail(source, 0, stored))
+    }
+}
