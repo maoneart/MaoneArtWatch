@@ -29,7 +29,7 @@ internal object GitHubReleaseFeed {
     /**
      * The asset the release workflow produces: `MaoneArtWatch.apk` or `MaoneArtWatch-<version>.apk`.
      */
-    private val AssetName = Regex("""^MaoneArtWatch(?:-[^.]+)?\.apk$""")
+    private val AssetName = Regex("""^MaoneArtWatch(?:-[A-Za-z0-9._-]+)?\.apk$""")
 
     private val json = Json { ignoreUnknownKeys = true }
 
